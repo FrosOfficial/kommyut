@@ -1,69 +1,41 @@
-# React + TypeScript + Vite
+🚌 kommyut
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A Group Research Project based on Sakay.ph integration
 
-Currently, two official plugins are available:
+📌 Overview
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+kommyut is a collaborative research and development project built in 4 days.
+Inspired by Sakay.ph
+, this project replicates and extends features of a public transport route-planning service, with custom enhancements tailored to our research goals.
 
-## Expanding the ESLint configuration
+✨ Key Features
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+⚡ Modern frontend stack: Built with React + TypeScript + Vite for speed and efficiency.
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+🛠️ Clean code structure: Includes ESLint and TypeScript configs for maintainability and type safety.
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
+📂 Scalable project setup: Well-organized directories (public/, src/, tsconfig.json, vite.config.js) for future growth.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+🗺️ Transport planner functions: Modeled after Sakay.ph’s route search, transit mapping, and schedule lookup capabilities.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+🔑 What Makes It Unique
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+🚀 Rapid prototyping – developed within just 4 days with focused, efficient design decisions.
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+📖 Research-oriented – not just a clone; explores how to integrate and possibly enhance route-planning systems (e.g. UI/UX, performance, custom data).
+
+🧩 Modular & extensible – designed for easy feature additions such as API integrations, mapping services, or mobile responsiveness.
+
+🔮 Future Roadmap
+
+📡 Add real-time transit data
+
+🗺️ Improve mapping UI/UX (interactive maps, overlays, better navigation flow)
+
+🌍 Expand to multiple cities & transit agencies
+
+📱 Implement offline support & mobile-friendly features
+
+👥 Team
+
+This was a group research project, developed collaboratively over 4 days.
