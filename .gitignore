@@ -1,25 +1,36 @@
-# Environment variables
+# Ignore everything by default
+*
+
+# But include our project files
+!my-app/
+!server/
+!README.md
+!DEPLOYMENT.md
+
+# Ignore sensitive files
 .env
 .env.local
 .env.production
 .env.development
-
-# Server dependencies
-server/node_modules/
 server/.env
-
-# My-app dependencies  
-my-app/node_modules/
 my-app/.env
-my-app/dist/
 
-# OS files
+# Ignore node_modules
+node_modules/
+server/node_modules/
+my-app/node_modules/
+
+# Ignore build outputs
+my-app/dist/
+my-app/build/
+
+# Ignore OS files
 .DS_Store
 Thumbs.db
+*.log
 
-# IDE
+# Ignore IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
-
