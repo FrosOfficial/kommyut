@@ -24,24 +24,38 @@ const KommyutApp: React.FC = () => {
     handleTabChange,
   } = useKommyut();
 
-  const renderActiveTab = () => {
-    switch (activeTab) {
-      case 'routes':
-        return <RoutesTab />;
-      case 'saved':
-        return <SavedTab savedRoutes={savedRoutes} />;
-      case 'activity':
-        return <ActivityTab currentTrip={currentTrip} />;
-      case 'profile':
-        return <ProfileTab userPoints={userPoints} />;
-      default:
-        return null;
-    }
+  // State for pre-filling route search from saved routes
+  const [routeSearchFrom, setRouteSearchFrom] = React.useState<string>('');
+  const [routeSearchTo, setRouteSearchTo] = React.useState<string>('');
+
+  // Handle when user clicks play on a saved route
+  const handleSavedRouteSelect = (from: string, to: string) => {
+    setRouteSearchFrom(from);
+    setRouteSearchTo(to);
+    handleTabChange('routes'); // Switch to routes tab
   };
+
+  // Keep all tabs mounted to preserve state
+  const renderTabs = () => (
+    <>
+      <div style={{ display: activeTab === 'routes' ? 'block' : 'none' }}>
+        <RoutesTab initialFrom={routeSearchFrom} initialTo={routeSearchTo} />
+      </div>
+      <div style={{ display: activeTab === 'saved' ? 'block' : 'none' }}>
+        <SavedTab savedRoutes={savedRoutes} onRouteSelect={handleSavedRouteSelect} />
+      </div>
+      <div style={{ display: activeTab === 'activity' ? 'block' : 'none' }}>
+        <ActivityTab currentTrip={currentTrip} />
+      </div>
+      <div style={{ display: activeTab === 'profile' ? 'block' : 'none' }}>
+        <ProfileTab userPoints={userPoints} />
+      </div>
+    </>
+  );
 
 return (
     <AuthProvider>
-      <div className="min-h-screen bg-gray-50">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 transition-colors">
         <Header
       isOfflineMode={isOfflineMode}
       showNotifications={showNotifications}
@@ -50,7 +64,7 @@ return (
 
     <main className="pb-20">
       <div className="p-4">
-        {renderActiveTab()}
+        {renderTabs()}
       </div>
     </main>
 

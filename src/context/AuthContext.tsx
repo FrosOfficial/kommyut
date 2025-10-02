@@ -6,6 +6,7 @@ import { getUserByUid } from '../services/api';
 
 interface ExtendedUser extends User {
   customDisplayName?: string;
+  points?: number;
 }
 
 interface AuthContextType {
@@ -32,7 +33,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // Merge Firebase user with database user data
           const extendedUser = {
             ...user,
-            customDisplayName: dbUser?.display_name || dbUser?.displayName || user.displayName
+            customDisplayName: dbUser?.display_name || dbUser?.displayName || user.displayName,
+            points: dbUser?.points || 0
           } as ExtendedUser;
           
           console.log('🔍 User data merge:', {
@@ -43,8 +45,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           setCurrentUser(extendedUser);
         } catch (error) {
-          console.log('No database user found, using Firebase user only');
-          setCurrentUser(user as ExtendedUser);
+          console.log('No database user found, creating user in database...');
+          try {
+            // Import createOrUpdateUser function
+            const { createOrUpdateUser } = await import('../services/api');
+            
+            // Create user in database
+            const newDbUser = await createOrUpdateUser({
+              uid: user.uid,
+              email: user.email,
+              displayName: user.displayName,
+              photoURL: user.photoURL,
+            });
+            
+            console.log('✅ User created in database:', newDbUser);
+            
+            // Merge Firebase user with database user data
+            const extendedUser = {
+              ...user,
+              customDisplayName: newDbUser?.display_name || newDbUser?.displayName || user.displayName,
+              points: newDbUser?.points || 0
+            } as ExtendedUser;
+            
+            setCurrentUser(extendedUser);
+          } catch (createError) {
+            console.log('Failed to create user in database, using Firebase user only');
+            setCurrentUser(user as ExtendedUser);
+          }
         }
       } else {
         setCurrentUser(null);

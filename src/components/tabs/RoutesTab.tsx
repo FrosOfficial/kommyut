@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Search, Loader2, Clock, ArrowRight, Star, Wallet, TrendingUp, 
+  Search, Loader2, Clock, ArrowRight, Star, Wallet, TrendingUp,
   Filter, ChevronRight, Sparkles, Award, Zap, Users, Activity, MapPin,
-  AlertCircle, DollarSign
+  AlertCircle, DollarSign, X, Navigation, Bookmark
 } from 'lucide-react';
 import * as api from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import { startTrip } from '../../services/api';
 
 // Theme colors based on logo
 const theme = {
@@ -58,11 +60,11 @@ interface RouteResult {
     regular: string;
     discounted?: string;
   };
-  distance?: string;
-  origin?: GTFSStop;
-  destination?: GTFSStop;
+  distance: string;
+  origin: GTFSStop;
+  destination: GTFSStop;
   routeType: number;
-  routeId?: string;
+  routeId: string;
 }
 
 interface RecentSearch {
@@ -95,14 +97,14 @@ interface CrowdLevelProps {
 const TrafficIndicator: React.FC<TrafficIndicatorProps> = ({ level }) => {
   const colors = ['bg-green-500', 'bg-yellow-500', 'bg-orange-500', 'bg-red-500'];
   const safeLevel = Math.max(0, Math.min(level, colors.length - 1));
-  
+
   return (
     <div className="flex space-x-1">
       {colors.map((color, i) => (
         <div
           key={i}
-          className={`h-2 w-2 rounded-full ${
-            i <= safeLevel ? color : 'bg-gray-300'
+          className={`h-2 w-2 rounded-full transition-colors ${
+            i <= safeLevel ? color : 'bg-gray-300 dark:bg-gray-600'
           }`}
         />
       ))}
@@ -127,7 +129,14 @@ const CrowdLevel: React.FC<CrowdLevelProps> = ({ level }) => {
   );
 };
 
-const RoutesTab: React.FC = () => {
+interface RoutesTabProps {
+  initialFrom?: string;
+  initialTo?: string;
+}
+
+const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
+  const { currentUser } = useAuth();
+  
   // Existing state
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
@@ -164,12 +173,76 @@ const RoutesTab: React.FC = () => {
   const [selectedFromStop, setSelectedFromStop] = useState<GTFSStop | null>(null);
   const [selectedToStop, setSelectedToStop] = useState<GTFSStop | null>(null);
   
+  // Trip tracking state
+  const [showJourneyModal, setShowJourneyModal] = useState(false);
+  const [selectedRoute, setSelectedRoute] = useState<RouteResult | null>(null);
+  const [isStartingTrip, setIsStartingTrip] = useState(false);
+
+  // Route saving state
+  const [savingRouteIndex, setSavingRouteIndex] = useState<number | null>(null);
+
+  // Popular routes state
+  const [popularRoutes, setPopularRoutes] = useState<PopularRoute[]>([]);
+  const [loadingPopularRoutes, setLoadingPopularRoutes] = useState(true);
+
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // Load GTFS and fare data on component mount
   useEffect(() => {
     loadAllData();
+    loadPopularRoutes();
   }, []);
+
+  // Load popular routes from trip history
+  const loadPopularRoutes = async () => {
+    try {
+      setLoadingPopularRoutes(true);
+      const routes = await api.getPopularRoutes(3);
+
+      // Transform API data to match PopularRoute interface
+      const transformedRoutes: PopularRoute[] = routes.map((route: any) => ({
+        from: route.from_location,
+        to: route.to_location,
+        fare: route.avg_fare ? `₱${Math.round(route.avg_fare)}` : 'N/A',
+        time: route.avg_duration_minutes
+          ? `${Math.round(route.avg_duration_minutes)} min`
+          : 'N/A',
+        rating: ((route.trip_count / 10) * 5).toFixed(1), // Simple rating based on popularity
+        traffic: route.avg_duration_minutes > 45 ? 'heavy' : route.avg_duration_minutes > 30 ? 'moderate' : 'light',
+        crowdLevel: Math.min(5, Math.ceil(route.trip_count / 5)),
+        mode: route.transit_type || 'Unknown',
+        alternatives: route.trip_count.toString()
+      }));
+
+      setPopularRoutes(transformedRoutes);
+    } catch (error) {
+      console.error('Error loading popular routes:', error);
+      // Keep empty array if no data
+      setPopularRoutes([]);
+    } finally {
+      setLoadingPopularRoutes(false);
+    }
+  };
+
+  // Handle initial values from saved routes
+  useEffect(() => {
+    if (initialFrom) {
+      setFromLocation(initialFrom);
+      // Try to find matching stop
+      const matchingStops = searchStops(initialFrom);
+      if (matchingStops.length > 0) {
+        setSelectedFromStop(matchingStops[0]);
+      }
+    }
+    if (initialTo) {
+      setToLocation(initialTo);
+      // Try to find matching stop
+      const matchingStops = searchStops(initialTo);
+      if (matchingStops.length > 0) {
+        setSelectedToStop(matchingStops[0]);
+      }
+    }
+  }, [initialFrom, initialTo, gtfsData.stops]);
 
   // Load all GTFS and fare data from API
   const loadAllData = async () => {
@@ -444,15 +517,22 @@ const RoutesTab: React.FC = () => {
   };
 
   // Find route between stops - using fast database query
-  const findRoute = async (fromStop: GTFSStop, toStop: GTFSStop): Promise<{ 
+  const findRoute = async (fromStop: GTFSStop, toStop: GTFSStop): Promise<{
     stops: GTFSStop[],
     route: GTFSRoute,
     trip: GTFSTrip
   }[]> => {
     try {
+      console.log('Calling findRoutesBetweenStops API with:', fromStop.stop_id, toStop.stop_id);
       // Use the new fast endpoint that finds all matching routes in one query
       const matchingRoutes = await api.findRoutesBetweenStops(fromStop.stop_id, toStop.stop_id);
-      
+      console.log('API response:', matchingRoutes);
+
+      if (!matchingRoutes || matchingRoutes.length === 0) {
+        console.warn('No routes found between stops');
+        return [];
+      }
+
       // Convert to the expected format
       return matchingRoutes.map((route: any) => ({
         stops: [fromStop, toStop], // Simplified - just show origin and destination
@@ -473,18 +553,70 @@ const RoutesTab: React.FC = () => {
       }));
     } catch (error) {
       console.error('Error finding routes:', error);
-      return [];
+      throw error; // Re-throw to let the calling function handle it
+    }
+  };
+
+  // Sort routes based on user preference
+  const sortByPreference = (routes: RouteResult[], preference: string): RouteResult[] => {
+    const sortedRoutes = [...routes];
+
+    switch (preference) {
+      case 'cheapest':
+        // Sort by fare (lowest first)
+        return sortedRoutes.sort((a, b) => {
+          const fareA = parseFloat(a.fare.regular.replace('₱', '').replace('N/A', '999999'));
+          const fareB = parseFloat(b.fare.regular.replace('₱', '').replace('N/A', '999999'));
+          return fareA - fareB;
+        });
+
+      case 'fastest':
+        // Sort by distance (shortest distance = fastest, assuming similar speeds)
+        return sortedRoutes.sort((a, b) => {
+          const distA = parseFloat(a.distance.replace(' km', ''));
+          const distB = parseFloat(b.distance.replace(' km', ''));
+          return distA - distB;
+        });
+
+      case 'comfort':
+        // Prioritize rail (LRT/MRT) over bus/jeep for comfort
+        return sortedRoutes.sort((a, b) => {
+          const comfortScore = (route: RouteResult) => {
+            if (route.mode.includes('LRT') || route.mode.includes('MRT')) return 3;
+            if (route.mode.includes('Bus')) return 2;
+            return 1;
+          };
+          return comfortScore(b) - comfortScore(a);
+        });
+
+      case 'balanced':
+        // Balance between cost and distance
+        return sortedRoutes.sort((a, b) => {
+          const scoreRoute = (route: RouteResult) => {
+            const fare = parseFloat(route.fare.regular.replace('₱', '').replace('N/A', '999999'));
+            const distance = parseFloat(route.distance.replace(' km', ''));
+            // Normalize and combine (lower is better)
+            return (fare / 50) + (distance / 10);
+          };
+          return scoreRoute(a) - scoreRoute(b);
+        });
+
+      default:
+        return sortedRoutes;
     }
   };
 
   // Enhanced search handler using GTFS data and API
   const handleSearch = async () => {
+    console.log('Search button clicked', { selectedFromStop, selectedToStop });
+
     if (!selectedFromStop || !selectedToStop) {
       alert("Please select both origin and destination from the suggestions!");
       return;
     }
 
     setIsSearching(true);
+    console.log('Starting search with stops:', selectedFromStop.stop_name, 'to', selectedToStop.stop_name);
 
     try {
       const newSearch: RecentSearch = {
@@ -493,10 +625,12 @@ const RoutesTab: React.FC = () => {
         time: "Just now"
       };
       setRecentSearches(prev => [newSearch, ...prev.slice(0, 4)]);
-      
+
+      console.log('Finding routes between stops...');
       // Find all possible routes between the stops (now async)
       const possibleRoutes = await findRoute(selectedFromStop, selectedToStop);
-      
+      console.log('Found routes:', possibleRoutes.length);
+
       // Calculate fares for each route (in parallel)
       const resultsPromises = possibleRoutes.map(async (routeInfo) => {
         // Calculate total distance between stops
@@ -517,82 +651,218 @@ const RoutesTab: React.FC = () => {
         const mode = getRouteTypeDescription(routeType, routeInfo.route.route_id);
         
         // Calculate fare based on route type using API
+        console.log(`Estimating fare for route ${routeInfo.route.route_id}...`);
         const fareEstimates = await estimateFare(
-          totalDistance, 
-          routeType, 
-          routeInfo.stops[0], 
+          totalDistance,
+          routeType,
+          routeInfo.stops[0],
           routeInfo.stops[routeInfo.stops.length - 1]
         );
-        
-        const fareEstimate = fareEstimates[0] || { 
+        console.log('Fare estimates:', fareEstimates);
+
+        const fareEstimate = fareEstimates[0] || {
           mode: 'Unknown',
           fare: { regular: 'N/A', discounted: 'N/A' }
         };
-        
+
         // Create step-by-step summary
         const summary = routeInfo.stops
           .map(stop => stop.stop_name)
           .join(" → ");
-        
+
         return {
           summary,
           routeName: `${routeInfo.route.route_long_name || routeInfo.route.route_short_name} (${routeInfo.trip.trip_headsign || mode})`,
           mode,
           fare: fareEstimate.fare,
           distance: `${totalDistance.toFixed(2)} km`,
-          origin: selectedFromStop,
-          destination: selectedToStop,
+          origin: routeInfo.stops[0],
+          destination: routeInfo.stops[routeInfo.stops.length - 1],
           routeType,
-          routeId: routeInfo.route.route_id
+          routeId: routeInfo.route.route_id || 'unknown'
         };
       });
 
-      const results = await Promise.all(resultsPromises);
+      console.log('Waiting for all route calculations...');
+      let results = await Promise.all(resultsPromises);
+      console.log('Final results before sorting:', results);
+
+      // Apply route preference sorting
+      results = sortByPreference(results, routePreference);
+      console.log('Final results after sorting:', results);
+
       setRouteResults(results);
     } catch (error) {
       console.error("Error during search:", error);
-      alert("An error occurred while searching. Please try again.");
+      alert("An error occurred while searching. Please try again. Check the console for details.");
     } finally {
       setIsSearching(false);
     }
   };
 
-  // Popular routes data
-  const popularRoutes: PopularRoute[] = [
-    {
-      from: "BGC",
-      to: "Makati",
-      fare: "₱15-45",
-      time: "25-40 min",
-      rating: "4.2",
-      traffic: "moderate",
-      crowdLevel: 3,
-      mode: "Bus",
-      alternatives: "5"
-    },
-    {
-      from: "Ortigas",
-      to: "QC",
-      fare: "₱13-35",
-      time: "30-50 min", 
-      rating: "4.0",
-      traffic: "heavy",
-      crowdLevel: 4,
-      mode: "MRT",
-      alternatives: "8"
-    },
-    {
-      from: "Alabang",
-      to: "MOA",
-      fare: "₱20-60",
-      time: "45-70 min",
-      rating: "3.8",
-      traffic: "light",
-      crowdLevel: 2,
-      mode: "Bus",
-      alternatives: "3"
+  // Trip tracking functions
+  const handleRouteSelect = (route: RouteResult) => {
+    if (!currentUser) {
+      alert("Please log in to start tracking your journey!");
+      return;
     }
-  ];
+    setSelectedRoute(route);
+    setShowJourneyModal(true);
+  };
+
+  const handleStartJourney = async () => {
+    if (!selectedRoute || !currentUser) return;
+    
+    setIsStartingTrip(true);
+    try {
+      // Calculate distance from route data
+      const distance = parseFloat(selectedRoute.distance.replace(' km', ''));
+      
+      // Calculate money saved (assuming they would have taken a taxi)
+      const taxiFare = distance * 12; // Rough estimate: ₱12 per km for taxi
+      const publicTransportFare = parseFloat(selectedRoute.fare.regular.replace('₱', ''));
+      const moneySaved = Math.max(0, taxiFare - publicTransportFare);
+      
+      const tripData = {
+        user_uid: currentUser.uid,
+        from_location: selectedRoute.origin.stop_name,
+        to_location: selectedRoute.destination.stop_name,
+        transit_type: selectedRoute.mode,
+        route_name: selectedRoute.routeName,
+        distance_km: distance,
+        fare_paid: publicTransportFare,
+        money_saved: moneySaved
+      };
+      
+      await startTrip(tripData);
+      
+      // Close modal
+      setShowJourneyModal(false);
+
+      // Show success notification with visual design
+      const successDiv = document.createElement('div');
+      successDiv.className = 'fixed top-4 right-4 z-50 animate-slide-in';
+      successDiv.innerHTML = `
+        <div class="bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-2xl shadow-2xl p-6 max-w-md">
+          <div class="flex items-start space-x-4">
+            <div class="flex-shrink-0">
+              <div class="w-12 h-12 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+              </div>
+            </div>
+            <div class="flex-1">
+              <h3 class="text-lg font-bold mb-1">🚀 Journey Started!</h3>
+              <p class="text-sm text-white text-opacity-90 mb-2">Your trip is now being tracked. Check the Activity tab to see your progress!</p>
+              <div class="flex items-center space-x-2 text-xs text-white text-opacity-75">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
+                </svg>
+                <span>Earning points for your commute</span>
+              </div>
+            </div>
+            <button onclick="this.parentElement.parentElement.remove()" class="text-white text-opacity-75 hover:text-opacity-100 transition-colors">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(successDiv);
+
+      // Auto remove after 5 seconds
+      setTimeout(() => {
+        successDiv.style.opacity = '0';
+        successDiv.style.transition = 'opacity 0.3s ease-out';
+        setTimeout(() => successDiv.remove(), 300);
+      }, 5000);
+
+      setSelectedRoute(null);
+      
+    } catch (error) {
+      console.error('Error starting trip:', error);
+      alert("Failed to start journey. Please try again.");
+    } finally {
+      setIsStartingTrip(false);
+    }
+  };
+
+  const handleCancelJourney = () => {
+    setShowJourneyModal(false);
+    setSelectedRoute(null);
+  };
+
+  // Handle saving a route
+  const handleSaveRoute = async (route: RouteResult, index: number) => {
+    if (!currentUser) {
+      alert("Please log in to save routes!");
+      return;
+    }
+
+    setSavingRouteIndex(index);
+    try {
+      const routeName = prompt("Enter a name for this route:", `${route.origin.stop_name} to ${route.destination.stop_name}`);
+
+      if (!routeName) {
+        setSavingRouteIndex(null);
+        return;
+      }
+
+      await api.saveRoute({
+        user_uid: currentUser.uid,
+        name: routeName,
+        from_stop_id: route.origin.stop_id,
+        from_stop_name: route.origin.stop_name,
+        to_stop_id: route.destination.stop_id,
+        to_stop_name: route.destination.stop_name,
+        route_id: route.routeId,
+        route_name: route.routeName,
+        transit_type: route.mode
+      });
+
+      // Show success toast
+      const successDiv = document.createElement('div');
+      successDiv.className = 'fixed top-4 right-4 z-50 animate-slide-in';
+      successDiv.innerHTML = `
+        <div class="bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-2xl shadow-2xl p-6 max-w-md">
+          <div class="flex items-start space-x-4">
+            <div class="flex-shrink-0">
+              <div class="w-12 h-12 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+              </div>
+            </div>
+            <div class="flex-1">
+              <h3 class="text-lg font-bold mb-1">📌 Route Saved!</h3>
+              <p class="text-sm text-white text-opacity-90">Check the Saved tab to view all your saved routes.</p>
+            </div>
+            <button onclick="this.parentElement.parentElement.remove()" class="text-white text-opacity-75 hover:text-opacity-100 transition-colors">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(successDiv);
+
+      setTimeout(() => {
+        successDiv.style.opacity = '0';
+        successDiv.style.transition = 'opacity 0.3s ease-out';
+        setTimeout(() => successDiv.remove(), 300);
+      }, 4000);
+
+    } catch (error) {
+      console.error('Error saving route:', error);
+      alert("Failed to save route. Please try again.");
+    } finally {
+      setSavingRouteIndex(null);
+    }
+  };
+
 
   // Show loading state while GTFS data loads
   if (!gtfsData.loaded) {
@@ -600,8 +870,8 @@ const RoutesTab: React.FC = () => {
       <div className="flex items-center justify-center py-12">
         <div className="text-center">
           <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4" style={{ color: theme.primary }} />
-          <h2 className="text-xl font-semibold text-gray-700">Loading Transit Data...</h2>
-          <p className="text-gray-500 mt-2">Reading GTFS stops, routes, and fare information</p>
+          <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-300 transition-colors">Loading Transit Data...</h2>
+          <p className="text-gray-500 dark:text-gray-400 mt-2 transition-colors">Reading GTFS stops, routes, and fare information</p>
         </div>
       </div>
     );
@@ -659,7 +929,7 @@ const RoutesTab: React.FC = () => {
                   />
                   
                   {fromSuggestions.length > 0 && !selectedFromStop && (
-                    <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    <div className="absolute z-30 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto transition-colors">
                       {fromSuggestions.map((stop, idx) => (
                         <button
                           key={idx}
@@ -668,10 +938,10 @@ const RoutesTab: React.FC = () => {
                             setFromLocation(stop.stop_name);
                             setFromSuggestions([]);
                           }}
-                          className="w-full text-left px-4 py-2 hover:bg-blue-50 border-b border-gray-100"
+                          className="w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 transition-colors"
                         >
-                          <div className="font-medium text-gray-800">{stop.stop_name}</div>
-                          <div className="text-xs text-gray-500">{stop.city || 'Unknown Location'}</div>
+                          <div className="font-medium text-gray-800 dark:text-white transition-colors">{stop.stop_name}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 transition-colors">{stop.city || 'Unknown Location'}</div>
                         </button>
                       ))}
                     </div>
@@ -697,7 +967,7 @@ const RoutesTab: React.FC = () => {
                   />
                   
                   {toSuggestions.length > 0 && !selectedToStop && (
-                    <div className="absolute z-30 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    <div className="absolute z-30 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto transition-colors">
                       {toSuggestions.map((stop, idx) => (
                         <button
                           key={idx}
@@ -706,10 +976,10 @@ const RoutesTab: React.FC = () => {
                             setToLocation(stop.stop_name);
                             setToSuggestions([]);
                           }}
-                          className="w-full text-left px-4 py-2 hover:bg-blue-50 border-b border-gray-100"
+                          className="w-full text-left px-4 py-2 hover:bg-blue-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 transition-colors"
                         >
-                          <div className="font-medium text-gray-800">{stop.stop_name}</div>
-                          <div className="text-xs text-gray-500">{stop.city || 'Unknown Location'}</div>
+                          <div className="font-medium text-gray-800 dark:text-white transition-colors">{stop.stop_name}</div>
+                          <div className="text-xs text-gray-500 dark:text-gray-400 transition-colors">{stop.city || 'Unknown Location'}</div>
                         </button>
                       ))}
                     </div>
@@ -778,8 +1048,8 @@ const RoutesTab: React.FC = () => {
 
         {/* Right Column - Available Routes & Fares */}
         <div className="lg:w-1/2">
-          <div className="bg-white rounded-2xl shadow-lg p-5 h-full">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 h-full transition-colors">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center transition-colors">
               <DollarSign className="h-5 w-5 text-green-600 mr-2" />
               Available Routes & Fares
             </h3>
@@ -787,10 +1057,10 @@ const RoutesTab: React.FC = () => {
             {routeResults.length > 0 ? (
               <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
                 {routeResults.map((route, i) => (
-                  <div key={i} className="p-4 border border-gray-200 rounded-xl hover:shadow-md transition-all bg-gradient-to-r from-gray-50 to-white">
+                  <div key={i} className="p-4 border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-md transition-all bg-gradient-to-r from-gray-50 dark:from-gray-700 to-white dark:to-gray-800">
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <div className="text-xs text-gray-500 mb-1">Route steps:</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mb-1 transition-colors">Route steps:</div>
                         <div className="space-y-1 mb-3">
                           {route.summary.split(" → ").map((stop, idx, arr) => (
                             <div key={idx} className="flex items-center">
@@ -803,10 +1073,10 @@ const RoutesTab: React.FC = () => {
                                   }`} 
                                 />
                                 <span className={`text-sm ${
-                                  idx === 0 || idx === arr.length - 1 ? 
-                                  "font-semibold text-gray-900" : 
-                                  "text-gray-600"
-                                }`}>
+                                  idx === 0 || idx === arr.length - 1 ?
+                                  "font-semibold text-gray-900 dark:text-white" :
+                                  "text-gray-600 dark:text-gray-400"
+                                } transition-colors`}>
                                   {stop}
                                 </span>
                               </div>
@@ -816,7 +1086,7 @@ const RoutesTab: React.FC = () => {
                             </div>
                           ))}
                         </div>
-                        <p className="text-xs text-gray-600 mb-2">{route.routeName}</p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 transition-colors">{route.routeName}</p>
                         
                         <div className="flex items-center space-x-3 flex-wrap gap-2">
                           <span className="px-2 py-1 text-white text-xs font-medium rounded-full"
@@ -827,21 +1097,47 @@ const RoutesTab: React.FC = () => {
                             <Wallet className="h-3 w-3 text-green-600" />
                             <span className="font-bold text-sm text-green-600">{route.fare.regular}</span>
                           </div>
-                          {route.distance && (
-                            <span className="text-xs text-gray-500">{route.distance}</span>
-                          )}
+                          <span className="text-xs text-gray-500 dark:text-gray-400 transition-colors">{route.distance}</span>
                         </div>
                       </div>
-                      <ChevronRight className="h-5 w-5 text-gray-400" />
+                      <div className="flex flex-col space-y-2">
+                        <button
+                          onClick={() => handleSaveRoute(route, i)}
+                          disabled={savingRouteIndex === i}
+                          className="flex items-center space-x-1 text-sm font-medium hover:underline"
+                          style={{ color: theme.secondary }}
+                          title="Save this route"
+                        >
+                          {savingRouteIndex === i ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>Saving...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Bookmark className="h-4 w-4" />
+                              <span>Save</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          onClick={() => handleRouteSelect(route)}
+                          className="flex items-center space-x-1 text-sm font-medium hover:underline"
+                          style={{ color: theme.primary }}
+                        >
+                          <span>Start Journey</span>
+                          <ChevronRight className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
               <div className="text-center py-8">
-                <MapPin className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                <p className="text-gray-500">Search for routes to see available options</p>
-                <p className="text-xs text-gray-400 mt-2">Enter origin and destination above</p>
+                <MapPin className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-3 transition-colors" />
+                <p className="text-gray-500 dark:text-gray-400 transition-colors">Search for routes to see available options</p>
+                <p className="text-xs text-gray-400 mt-2 transition-colors">Enter origin and destination above</p>
               </div>
             )}
           </div>
@@ -850,9 +1146,9 @@ const RoutesTab: React.FC = () => {
 
       {/* Recent Searches Section */}
       {recentSearches.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-lg p-5 mb-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-            <Clock className="h-5 w-5 text-gray-500 mr-2" />
+        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 mb-6 transition-colors">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center transition-colors">
+            <Clock className="h-5 w-5 text-gray-500 dark:text-gray-400 mr-2 transition-colors" />
             Recent Searches
           </h3>
           <div className="space-y-3">
@@ -863,16 +1159,16 @@ const RoutesTab: React.FC = () => {
                   setFromLocation(search.from);
                   setToLocation(search.to);
                 }}
-                className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 rounded-xl transition-all"
+                className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-xl transition-all"
               >
                 <div className="flex items-center space-x-3">
                   <div className="flex items-center space-x-2 text-sm">
-                    <span className="font-medium text-gray-900">{search.from}</span>
-                    <ArrowRight className="h-4 w-4 text-gray-400" />
-                    <span className="font-medium text-gray-900">{search.to}</span>
+                    <span className="font-medium text-gray-900 dark:text-white transition-colors">{search.from}</span>
+                    <ArrowRight className="h-4 w-4 text-gray-400 transition-colors" />
+                    <span className="font-medium text-gray-900 dark:text-white transition-colors">{search.to}</span>
                   </div>
                 </div>
-                <div className="text-xs text-gray-500">{search.time}</div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 transition-colors">{search.time}</div>
               </button>
             ))}
           </div>
@@ -880,27 +1176,41 @@ const RoutesTab: React.FC = () => {
       )}
 
       {/* Popular Routes Section */}
-      <div className="bg-white rounded-2xl shadow-lg p-5 mb-6">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 mb-6 transition-colors">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center transition-colors">
             <TrendingUp className="h-5 w-5 text-orange-500 mr-2" />
             Popular Routes
           </h3>
-          <button className="text-sm font-medium hover:underline"
-            style={{ color: theme.primary }}>
-            View All
-          </button>
         </div>
-        
-        <div className="space-y-4">
-          {popularRoutes.map((route, i) => (
-            <div key={i} className="p-4 bg-gradient-to-r from-gray-50 to-white border border-gray-200 rounded-xl hover:shadow-md transition-all">
+
+        {loadingPopularRoutes ? (
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="p-4 bg-gray-50 dark:bg-gray-700 rounded-xl animate-pulse">
+                <div className="h-4 bg-gray-200 dark:bg-gray-600 rounded w-3/4 mb-2"></div>
+                <div className="h-3 bg-gray-200 dark:bg-gray-600 rounded w-1/2"></div>
+              </div>
+            ))}
+          </div>
+        ) : popularRoutes.length === 0 ? (
+          <div className="text-center py-8">
+            <TrendingUp className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+            <p className="text-gray-500 dark:text-gray-400">No popular routes yet</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
+              Complete trips to see trending routes
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {popularRoutes.map((route, i) => (
+            <div key={i} className="p-4 bg-gradient-to-r from-gray-50 dark:from-gray-700 to-white dark:to-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl hover:shadow-md transition-all">
               <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
-                    <span className="font-semibold text-gray-900">{route.from}</span>
-                    <ArrowRight className="h-4 w-4 text-gray-400" />
-                    <span className="font-semibold text-gray-900">{route.to}</span>
+                    <span className="font-semibold text-gray-900 dark:text-white transition-colors">{route.from}</span>
+                    <ArrowRight className="h-4 w-4 text-gray-400 transition-colors" />
+                    <span className="font-semibold text-gray-900 dark:text-white transition-colors">{route.to}</span>
                   </div>
                   
                   <div className="flex items-center space-x-4 flex-wrap gap-2">
@@ -930,14 +1240,14 @@ const RoutesTab: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                   <div className="flex items-center space-x-1">
-                    <span className="text-xs text-gray-500">Traffic:</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 transition-colors">Traffic:</span>
                     <TrafficIndicator level={route.traffic === 'light' ? 0 : route.traffic === 'moderate' ? 1 : 2} />
                   </div>
                   <div className="flex items-center space-x-1">
-                    <span className="text-xs text-gray-500">Crowd:</span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400 transition-colors">Crowd:</span>
                     <CrowdLevel level={route.crowdLevel} />
                   </div>
-                  <span className="text-xs text-gray-500">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 transition-colors">
                     {route.alternatives} alternatives
                   </span>
                 </div>
@@ -950,12 +1260,13 @@ const RoutesTab: React.FC = () => {
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Transportation Mode Filter */}
-      <div className="bg-white rounded-2xl shadow-lg p-5 mb-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 mb-6 transition-colors">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center transition-colors">
           <Filter className="h-5 w-5 text-purple-500 mr-2" />
           Transportation Modes
         </h3>
@@ -968,13 +1279,13 @@ const RoutesTab: React.FC = () => {
             { name: 'LRT', icon: '🚊', color: 'bg-purple-500', available: true },
             { name: 'Trike', icon: '🛺', color: 'bg-red-500', available: true },
           ].map(mode => (
-            <div key={mode.name} className={`p-4 rounded-xl border-2 transition-all ${mode.available ? 'hover:shadow-md cursor-pointer' : 'opacity-50'}`}>
+            <div key={mode.name} className={`p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 transition-all ${mode.available ? 'hover:shadow-md cursor-pointer' : 'opacity-50'}`}>
               <div className="text-center">
                 <div className={`w-12 h-12 ${mode.color} rounded-xl flex items-center justify-center mx-auto mb-2 text-xl`}>
                   {mode.icon}
                 </div>
-                <p className="font-medium text-gray-900">{mode.name}</p>
-                <p className="text-xs text-gray-500">
+                <p className="font-medium text-gray-900 dark:text-white transition-colors">{mode.name}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 transition-colors">
                   {mode.available ? 'Available' : 'No data'}
                 </p>
               </div>
@@ -982,6 +1293,76 @@ const RoutesTab: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Journey Start Confirmation Modal */}
+      {showJourneyModal && selectedRoute && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full transition-colors">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white transition-colors">Start Your Journey?</h3>
+                <button
+                  onClick={handleCancelJourney}
+                  className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="bg-blue-50 dark:bg-blue-900 dark:bg-opacity-30 rounded-lg p-4 transition-colors">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <Navigation className="h-5 w-5 text-blue-600 dark:text-blue-400 transition-colors" />
+                    <span className="font-semibold text-blue-900 dark:text-blue-300 transition-colors">Route Details</span>
+                  </div>
+                  <p className="text-sm text-blue-800 dark:text-blue-300 mb-1 transition-colors">
+                    <strong>From:</strong> {selectedRoute.origin.stop_name}
+                  </p>
+                  <p className="text-sm text-blue-800 dark:text-blue-300 mb-1 transition-colors">
+                    <strong>To:</strong> {selectedRoute.destination.stop_name}
+                  </p>
+                  <p className="text-sm text-blue-800 dark:text-blue-300 mb-1 transition-colors">
+                    <strong>Mode:</strong> {selectedRoute.mode}
+                  </p>
+                  <p className="text-sm text-blue-800 dark:text-blue-300 transition-colors">
+                    <strong>Fare:</strong> {selectedRoute.fare.regular}
+                  </p>
+                </div>
+                
+                <div className="bg-green-50 dark:bg-green-900 dark:bg-opacity-30 rounded-lg p-4 transition-colors">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <Award className="h-5 w-5 text-green-600 dark:text-green-400 transition-colors" />
+                    <span className="font-semibold text-green-900 dark:text-green-300 transition-colors">Benefits</span>
+                  </div>
+                  <ul className="text-sm text-green-800 dark:text-green-300 space-y-1 transition-colors">
+                    <li>• Earn points for your journey</li>
+                    <li>• Track your commuter level progress</li>
+                    <li>• Save money vs. private transport</li>
+                    <li>• Contribute to environmental sustainability</li>
+                  </ul>
+                </div>
+                
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleCancelJourney}
+                    className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleStartJourney}
+                    disabled={isStartingTrip}
+                    className="flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50"
+                    style={{ backgroundColor: theme.primary }}
+                  >
+                    {isStartingTrip ? 'Starting...' : 'Yes, Start Journey!'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </>
   );

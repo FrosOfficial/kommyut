@@ -139,6 +139,10 @@ const handleGoogleSignIn = async () => {
       setErrorMessage(null);
       setShowError(false);
       
+      // Debug: Log current domain
+      console.log('Current domain:', window.location.hostname);
+      console.log('Current origin:', window.location.origin);
+      
       const result = await signInWithPopup(auth, googleProvider);
       
       // If sign in was successful, close the modal immediately
@@ -146,34 +150,8 @@ const handleGoogleSignIn = async () => {
         // Close modal first for better UX
         onClose();
         
-        // Then update user in background with proper display name handling
-        try {
-          // First, try to get the existing user data from database
-          let existingUser = null;
-          try {
-            existingUser = await getUserByUid(result.user.uid);
-          } catch (error) {
-            // User doesn't exist in database yet, that's fine
-            console.log('User not found in database, will create new user');
-          }
-          
-          // Use existing display name if available, otherwise use Google's display name
-          const displayName = existingUser?.displayName || result.user.displayName;
-          
-          console.log('🔍 Display name resolution:', {
-            existingUserDisplayName: existingUser?.displayName,
-            googleDisplayName: result.user.displayName,
-            finalDisplayName: displayName
-          });
-          
-          await createOrUpdateUser({
-            ...result.user,
-            displayName: displayName
-          });
-        } catch (error) {
-          console.error('Error updating user:', error);
-          // User is still signed in even if this fails
-        }
+        // Note: User creation/update is now handled by AuthContext
+        // No need to duplicate the logic here
       }
     } catch (error) {
       console.error('Google sign in error:', error);

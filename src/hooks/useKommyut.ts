@@ -1,8 +1,8 @@
 // my-app/src/hooks/useKommyut.ts
 
 import { useState, useRef } from 'react';
-import type { RecentSearch, LiveActivity, Route } from '../types';
-import type { SavedRoute, PopularRoute } from '../types';
+import type { RecentSearch } from '../types';
+import type { SavedRoute } from '../types';
 
 
 export const useKommyut = () => {
@@ -17,7 +17,7 @@ export const useKommyut = () => {
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]); // Fixed: using SavedRoute[] instead of Route[]
   const [recentSearches, setRecentSearches] = useState<RecentSearch[]>([]);
   const [routePreference, setRoutePreference] = useState('balanced');
-  const [userPoints, setUserPoints] = useState(1250);
+  const [userPoints, setUserPoints] = useState(0);
   const [currentTrip, setCurrentTrip] = useState(true);
 
   const searchInputRef = useRef<HTMLInputElement>(null); // Fixed: removed | null

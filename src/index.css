@@ -1,4 +1,7 @@
 /* my-app/src/index.css */
 
 @import "tailwindcss";
+
+/* Enable dark mode variants */
+@variant dark (&:where(.dark, .dark *));
     

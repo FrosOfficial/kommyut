@@ -31,19 +31,19 @@ const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="sticky top-0 z-50 bg-white shadow-sm border-b">
+      <header className="sticky top-0 z-50 bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700 transition-colors">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center space-x-3">
             <KommyutLogo className="w-10 h-10" />
             <div>
-              <h1 className="text-xl font-bold" style={{ color: theme.primary }}>Kommyut</h1>
+              <h1 className="text-xl font-bold dark:text-white" style={{ color: theme.primary }}>Kommyut</h1>
               <div className="flex items-center space-x-1">
                 {isOfflineMode ? (
                   <WifiOff className="h-3 w-3 text-red-500" />
                 ) : (
                   <Wifi className="h-3 w-3 text-green-500" />
                 )}
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-gray-500 dark:text-gray-400">
                   {isOfflineMode ? 'Offline' : 'Connected'}
                 </span>
               </div>
@@ -53,28 +53,28 @@ const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center space-x-2">
             <button
               onClick={() => setShowNotifications(!showNotifications)}
-              className="p-2 hover:bg-gray-100 rounded-lg relative"
+              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg relative transition-colors"
             >
-              <Bell className="h-5 w-5" style={{ color: theme.primary }} />
+              <Bell className="h-5 w-5 dark:text-white" style={{ color: theme.primary }} />
               <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full" />
             </button>
-            
+
             {currentUser ? (
               <div className="flex items-center space-x-3">
-                <div className="flex items-center space-x-2 bg-gray-100 py-2 px-3 rounded-lg">
+                <div className="flex items-center space-x-2 bg-gray-100 dark:bg-gray-700 py-2 px-3 rounded-lg transition-colors">
                   <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
                     <span className="text-white font-semibold">{((currentUser as any).customDisplayName || currentUser.displayName || currentUser.email)?.charAt(0).toUpperCase()}</span>
                   </div>
                   <div>
-                    <div className="font-semibold text-gray-800">{(currentUser as any).customDisplayName || currentUser.displayName || currentUser.email}</div>
-                    <div className="text-xs text-gray-500">Signed in</div>
+                    <div className="font-semibold text-gray-800 dark:text-white">{(currentUser as any).customDisplayName || currentUser.displayName || currentUser.email}</div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">Signed in</div>
                   </div>
                 </div>
-                <button 
+                <button
                   onClick={handleSignOut}
-                  className="p-2 hover:bg-gray-100 rounded-lg"
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                 >
-                  <LogOut className="h-5 w-5" style={{ color: theme.primary }} />
+                  <LogOut className="h-5 w-5 dark:text-white" style={{ color: theme.primary }} />
                 </button>
               </div>
             ) : (
