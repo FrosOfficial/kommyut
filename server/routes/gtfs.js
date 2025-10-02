@@ -99,10 +99,73 @@ router.get('/routes/:routeId/schedule', async (req, res) => {
 router.get('/find-routes/:fromStopId/:toStopId', async (req, res) => {
   try {
     const { fromStopId, toStopId } = req.params;
-    
+
+    console.log('=== DEBUG: Finding routes ===');
+    console.log('From Stop ID:', fromStopId);
+    console.log('To Stop ID:', toStopId);
+
+    // Check if stops exist in stop_times
+    const fromStopCheck = await db.query(
+      'SELECT COUNT(*) as count FROM stop_times WHERE stop_id = $1',
+      [fromStopId]
+    );
+    const toStopCheck = await db.query(
+      'SELECT COUNT(*) as count FROM stop_times WHERE stop_id = $1',
+      [toStopId]
+    );
+
+    console.log('From stop in stop_times:', fromStopCheck.rows[0].count);
+    console.log('To stop in stop_times:', toStopCheck.rows[0].count);
+
+    if (fromStopCheck.rows[0].count == 0 || toStopCheck.rows[0].count == 0) {
+      console.log('⚠️ One or both stops not found in stop_times table');
+      return res.json([]);
+    }
+
+    // Check which routes serve each stop
+    const fromRoutes = await db.query(`
+      SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
+      FROM routes r
+      JOIN trips t ON r.route_id = t.route_id
+      JOIN stop_times st ON t.trip_id = st.trip_id
+      WHERE st.stop_id = $1
+    `, [fromStopId]);
+
+    const toRoutes = await db.query(`
+      SELECT DISTINCT r.route_id, r.route_short_name, r.route_long_name
+      FROM routes r
+      JOIN trips t ON r.route_id = t.route_id
+      JOIN stop_times st ON t.trip_id = st.trip_id
+      WHERE st.stop_id = $1
+    `, [toStopId]);
+
+    console.log('Routes serving FROM stop:', fromRoutes.rows);
+    console.log('Routes serving TO stop:', toRoutes.rows);
+
+    // Check if the trip_ids in stop_times actually exist in trips table
+    const fromTrips = await db.query(`
+      SELECT DISTINCT st.trip_id
+      FROM stop_times st
+      WHERE st.stop_id = $1
+      LIMIT 3
+    `, [fromStopId]);
+
+    console.log('Sample trip_ids for FROM stop:', fromTrips.rows);
+
+    // Check if those trip_ids exist in trips table
+    if (fromTrips.rows.length > 0) {
+      const tripCheck = await db.query(`
+        SELECT trip_id, route_id, service_id
+        FROM trips
+        WHERE trip_id = $1
+      `, [fromTrips.rows[0].trip_id]);
+
+      console.log('Trip details from trips table:', tripCheck.rows);
+    }
+
     // Find all routes that have both stops
     const result = await db.query(`
-      SELECT DISTINCT 
+      SELECT DISTINCT
         r.route_id,
         r.route_short_name,
         r.route_long_name,
@@ -122,7 +185,8 @@ router.get('/find-routes/:fromStopId/:toStopId', async (req, res) => {
         WHERE t2.route_id = r.route_id AND st2.stop_id = $2
       )
     `, [fromStopId, toStopId]);
-    
+
+    console.log('Routes found:', result.rows.length);
     res.json(result.rows);
   } catch (error) {
     console.error('Error finding routes:', error);
