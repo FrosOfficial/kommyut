@@ -4,12 +4,12 @@ import { getStorage } from 'firebase/storage';
 
 // Replace these with your Firebase config values
 const firebaseConfig = {
-  apiKey: "AIzaSyBZR5Lsy6Aq6VtH8Aqwnvjw2LkWCPUITCo",
-  authDomain: "kommyut-auth.firebaseapp.com",
-  projectId: "kommyut-auth",
-  storageBucket: "kommyut-auth.firebasestorage.app",
-  messagingSenderId: "734642245285",
-  appId: "1:734642245285:web:72646c234043be6eeb874c"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase
