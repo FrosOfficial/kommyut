@@ -2,9 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Search, Loader2, Clock, ArrowRight, Star, Wallet, TrendingUp, 
   Filter, ChevronRight, Sparkles, Award, Zap, Users, Activity, MapPin,
-  AlertCircle, DollarSign
+  AlertCircle, DollarSign, X, Navigation
 } from 'lucide-react';
 import * as api from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
+import { startTrip } from '../../services/api';
 
 // Theme colors based on logo
 const theme = {
@@ -128,6 +130,8 @@ const CrowdLevel: React.FC<CrowdLevelProps> = ({ level }) => {
 };
 
 const RoutesTab: React.FC = () => {
+  const { currentUser } = useAuth();
+  
   // Existing state
   const [fromLocation, setFromLocation] = useState("");
   const [toLocation, setToLocation] = useState("");
@@ -163,6 +167,11 @@ const RoutesTab: React.FC = () => {
   const [toSuggestions, setToSuggestions] = useState<GTFSStop[]>([]);
   const [selectedFromStop, setSelectedFromStop] = useState<GTFSStop | null>(null);
   const [selectedToStop, setSelectedToStop] = useState<GTFSStop | null>(null);
+  
+  // Trip tracking state
+  const [showJourneyModal, setShowJourneyModal] = useState(false);
+  const [selectedRoute, setSelectedRoute] = useState<RouteResult | null>(null);
+  const [isStartingTrip, setIsStartingTrip] = useState(false);
   
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -479,12 +488,17 @@ const RoutesTab: React.FC = () => {
 
   // Enhanced search handler using GTFS data and API
   const handleSearch = async () => {
+    console.log('Search button clicked');
+    console.log('Selected from stop:', selectedFromStop);
+    console.log('Selected to stop:', selectedToStop);
+    
     if (!selectedFromStop || !selectedToStop) {
       alert("Please select both origin and destination from the suggestions!");
       return;
     }
 
     setIsSearching(true);
+    console.log('Starting search...');
 
     try {
       const newSearch: RecentSearch = {
@@ -494,67 +508,178 @@ const RoutesTab: React.FC = () => {
       };
       setRecentSearches(prev => [newSearch, ...prev.slice(0, 4)]);
       
+      console.log('Finding routes between stops...');
       // Find all possible routes between the stops (now async)
       const possibleRoutes = await findRoute(selectedFromStop, selectedToStop);
+      console.log('Found routes:', possibleRoutes);
       
+      if (possibleRoutes.length === 0) {
+        console.log('No routes found, creating fallback route');
+        // Create a fallback route if no direct routes are found
+        const fallbackRoute = {
+          stops: [selectedFromStop, selectedToStop],
+          route: {
+            route_id: 'fallback_route',
+            route_short_name: 'Direct',
+            route_long_name: 'Direct Route',
+            route_type: '3', // Bus
+            agency_id: 'unknown'
+          },
+          trip: {
+            trip_id: 'fallback_trip',
+            route_id: 'fallback_route',
+            service_id: 'default',
+            trip_headsign: 'Direct Route',
+            direction_id: '0'
+          }
+        };
+        possibleRoutes.push(fallbackRoute);
+      }
+      
+      console.log('Calculating fares for routes...');
       // Calculate fares for each route (in parallel)
       const resultsPromises = possibleRoutes.map(async (routeInfo) => {
-        // Calculate total distance between stops
-        let totalDistance = 0;
-        for (let i = 0; i < routeInfo.stops.length - 1; i++) {
-          const curr = routeInfo.stops[i];
-          const next = routeInfo.stops[i + 1];
-          totalDistance += calculateDistance(
-            parseFloat(curr.stop_lat),
-            parseFloat(curr.stop_lon),
-            parseFloat(next.stop_lat),
-            parseFloat(next.stop_lon)
+        try {
+          // Calculate total distance between stops
+          let totalDistance = 0;
+          for (let i = 0; i < routeInfo.stops.length - 1; i++) {
+            const curr = routeInfo.stops[i];
+            const next = routeInfo.stops[i + 1];
+            totalDistance += calculateDistance(
+              parseFloat(curr.stop_lat),
+              parseFloat(curr.stop_lon),
+              parseFloat(next.stop_lat),
+              parseFloat(next.stop_lon)
+            );
+          }
+          
+          // Get route type and determine mode
+          const routeType = parseInt(routeInfo.route.route_type);
+          const mode = getRouteTypeDescription(routeType, routeInfo.route.route_id);
+          
+          console.log(`Calculating fare for route ${routeInfo.route.route_id}, type: ${routeType}, distance: ${totalDistance.toFixed(2)}km`);
+          
+          // Calculate fare based on route type using API
+          const fareEstimates = await estimateFare(
+            totalDistance, 
+            routeType, 
+            routeInfo.stops[0], 
+            routeInfo.stops[routeInfo.stops.length - 1]
           );
+          
+          const fareEstimate = fareEstimates[0] || { 
+            mode: 'Unknown',
+            fare: { regular: 'N/A', discounted: 'N/A' }
+          };
+          
+          // Create step-by-step summary
+          const summary = routeInfo.stops
+            .map(stop => stop.stop_name)
+            .join(" → ");
+          
+          const result = {
+            summary,
+            routeName: `${routeInfo.route.route_long_name || routeInfo.route.route_short_name} (${routeInfo.trip.trip_headsign || mode})`,
+            mode,
+            fare: fareEstimate.fare,
+            distance: `${totalDistance.toFixed(2)} km`,
+            origin: selectedFromStop,
+            destination: selectedToStop,
+            routeType,
+            routeId: routeInfo.route.route_id
+          };
+          
+          console.log('Created result:', result);
+          return result;
+        } catch (error) {
+          console.error('Error processing route:', error);
+          // Return a fallback result
+          return {
+            summary: `${routeInfo.stops[0].stop_name} → ${routeInfo.stops[routeInfo.stops.length - 1].stop_name}`,
+            routeName: `${routeInfo.route.route_long_name || routeInfo.route.route_short_name}`,
+            mode: 'Unknown',
+            fare: { regular: 'N/A', discounted: 'N/A' },
+            distance: 'Unknown',
+            origin: selectedFromStop,
+            destination: selectedToStop,
+            routeType: parseInt(routeInfo.route.route_type),
+            routeId: routeInfo.route.route_id
+          };
         }
-        
-        // Get route type and determine mode
-        const routeType = parseInt(routeInfo.route.route_type);
-        const mode = getRouteTypeDescription(routeType, routeInfo.route.route_id);
-        
-        // Calculate fare based on route type using API
-        const fareEstimates = await estimateFare(
-          totalDistance, 
-          routeType, 
-          routeInfo.stops[0], 
-          routeInfo.stops[routeInfo.stops.length - 1]
-        );
-        
-        const fareEstimate = fareEstimates[0] || { 
-          mode: 'Unknown',
-          fare: { regular: 'N/A', discounted: 'N/A' }
-        };
-        
-        // Create step-by-step summary
-        const summary = routeInfo.stops
-          .map(stop => stop.stop_name)
-          .join(" → ");
-        
-        return {
-          summary,
-          routeName: `${routeInfo.route.route_long_name || routeInfo.route.route_short_name} (${routeInfo.trip.trip_headsign || mode})`,
-          mode,
-          fare: fareEstimate.fare,
-          distance: `${totalDistance.toFixed(2)} km`,
-          origin: selectedFromStop,
-          destination: selectedToStop,
-          routeType,
-          routeId: routeInfo.route.route_id
-        };
       });
 
+      console.log('Waiting for all route calculations to complete...');
       const results = await Promise.all(resultsPromises);
+      console.log('Search results:', results);
       setRouteResults(results);
+      
+      if (results.length === 0) {
+        console.log('No results found, showing fallback message');
+        alert("No direct routes found. Try selecting different stops or check if the stops are connected by public transit.");
+      }
     } catch (error) {
       console.error("Error during search:", error);
-      alert("An error occurred while searching. Please try again.");
+      alert(`An error occurred while searching: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again.`);
     } finally {
       setIsSearching(false);
     }
+  };
+
+  // Trip tracking functions
+  const handleRouteSelect = (route: RouteResult) => {
+    if (!currentUser) {
+      alert("Please log in to start tracking your journey!");
+      return;
+    }
+    setSelectedRoute(route);
+    setShowJourneyModal(true);
+  };
+
+  const handleStartJourney = async () => {
+    if (!selectedRoute || !currentUser) return;
+    
+    setIsStartingTrip(true);
+    try {
+      // Calculate distance from route data
+      const distance = selectedRoute.distance ? 
+        parseFloat(selectedRoute.distance.replace(' km', '')) : 0;
+      
+      // Calculate money saved (assuming they would have taken a taxi)
+      const taxiFare = distance * 12; // Rough estimate: ₱12 per km for taxi
+      const publicTransportFare = parseFloat(selectedRoute.fare.regular.replace('₱', ''));
+      const moneySaved = Math.max(0, taxiFare - publicTransportFare);
+      
+      const tripData = {
+        user_uid: currentUser.uid,
+        from_location: fromLocation,
+        to_location: toLocation,
+        transit_type: selectedRoute.mode,
+        route_name: selectedRoute.routeName,
+        distance_km: distance,
+        fare_paid: publicTransportFare,
+        money_saved: moneySaved
+      };
+      
+      await startTrip(tripData);
+      
+      // Close modal and show success
+      setShowJourneyModal(false);
+      setSelectedRoute(null);
+      
+      // Show success message
+      alert("🚀 Journey started! Your trip is now being tracked. Check the Activity tab to see your progress!");
+      
+    } catch (error) {
+      console.error('Error starting trip:', error);
+      alert("Failed to start journey. Please try again.");
+    } finally {
+      setIsStartingTrip(false);
+    }
+  };
+
+  const handleCancelJourney = () => {
+    setShowJourneyModal(false);
+    setSelectedRoute(null);
   };
 
   // Popular routes data
@@ -832,7 +957,14 @@ const RoutesTab: React.FC = () => {
                           )}
                         </div>
                       </div>
-                      <ChevronRight className="h-5 w-5 text-gray-400" />
+                      <button 
+                        onClick={() => handleRouteSelect(route)}
+                        className="flex items-center space-x-1 text-sm font-medium hover:underline"
+                        style={{ color: theme.primary }}
+                      >
+                        <span>Start Journey</span>
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -982,6 +1114,76 @@ const RoutesTab: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Journey Start Confirmation Modal */}
+      {showJourneyModal && selectedRoute && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-bold text-gray-900">Start Your Journey?</h3>
+                <button 
+                  onClick={handleCancelJourney}
+                  className="text-gray-400 hover:text-gray-600"
+                >
+                  <X className="h-6 w-6" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <Navigation className="h-5 w-5 text-blue-600" />
+                    <span className="font-semibold text-blue-900">Route Details</span>
+                  </div>
+                  <p className="text-sm text-blue-800 mb-1">
+                    <strong>From:</strong> {fromLocation}
+                  </p>
+                  <p className="text-sm text-blue-800 mb-1">
+                    <strong>To:</strong> {toLocation}
+                  </p>
+                  <p className="text-sm text-blue-800 mb-1">
+                    <strong>Mode:</strong> {selectedRoute.mode}
+                  </p>
+                  <p className="text-sm text-blue-800">
+                    <strong>Fare:</strong> {selectedRoute.fare.regular}
+                  </p>
+                </div>
+                
+                <div className="bg-green-50 rounded-lg p-4">
+                  <div className="flex items-center space-x-2 mb-2">
+                    <Award className="h-5 w-5 text-green-600" />
+                    <span className="font-semibold text-green-900">Benefits</span>
+                  </div>
+                  <ul className="text-sm text-green-800 space-y-1">
+                    <li>• Earn points for your journey</li>
+                    <li>• Track your commuter level progress</li>
+                    <li>• Save money vs. private transport</li>
+                    <li>• Contribute to environmental sustainability</li>
+                  </ul>
+                </div>
+                
+                <div className="flex space-x-3">
+                  <button
+                    onClick={handleCancelJourney}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleStartJourney}
+                    disabled={isStartingTrip}
+                    className="flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50"
+                    style={{ backgroundColor: theme.primary }}
+                  >
+                    {isStartingTrip ? 'Starting...' : 'Yes, Start Journey!'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
     </>
   );

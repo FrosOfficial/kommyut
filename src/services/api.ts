@@ -205,3 +205,25 @@ export const getMaxDistances = async () => {
     throw error;
   }
 };
+
+// Trip tracking API
+export const startTrip = async (tripData: any) => {
+  try {
+    const response = await fetch(`${API_URL}/trips`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(tripData),
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to start trip');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('Error starting trip:', error);
+    throw error;
+  }
+};
