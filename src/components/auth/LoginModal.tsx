@@ -2,9 +2,9 @@
 
 import React, { useState } from 'react';
 import { X, Mail, Lock, User, Eye, EyeOff, AlertCircle } from 'lucide-react';
-import { signInWithPopup } from 'firebase/auth';
+import { signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, googleProvider } from '../../config/firebase';
-import { createOrUpdateUser } from '../../services/api';
+import { createOrUpdateUser, getUserByUid } from '../../services/api';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -27,27 +27,104 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, theme }) => {
   });
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showError, setShowError] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [emailPasswordDisabled, setEmailPasswordDisabled] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Clear any existing error
+    setIsLoading(true);
+    
+    // Clear any existing messages
     setShowError(false);
+    setShowSuccess(false);
     setErrorMessage(null);
+    setSuccessMessage(null);
+    
+    console.log('🚀 Attempting authentication...');
 
-    // Validate form data
-    if (!formData.email || !formData.password) {
-      setErrorMessage('Please fill in all required fields');
+    try {
+      // Validate form data
+      if (!formData.email || !formData.password) {
+        throw new Error('Please fill in all required fields');
+      }
+
+      if (!isLogin) {
+        // Sign up validation
+        if (!formData.name) {
+          throw new Error('Please enter your full name');
+        }
+        if (formData.password !== formData.confirmPassword) {
+          throw new Error('Passwords do not match');
+        }
+        if (formData.password.length < 6) {
+          throw new Error('Password must be at least 6 characters long');
+        }
+
+        // Create account
+        console.log('📧 Creating account with email:', formData.email);
+        const userCredential = await createUserWithEmailAndPassword(
+          auth, 
+          formData.email, 
+          formData.password
+        );
+        console.log('✅ Account created successfully!', userCredential.user);
+        
+        // Update user profile with display name
+        if (userCredential.user) {
+          await createOrUpdateUser({
+            uid: userCredential.user.uid,
+            email: userCredential.user.email,
+            displayName: formData.name,
+            photoURL: userCredential.user.photoURL,
+          });
+        }
+
+        setSuccessMessage('Account successfully created!');
+        setShowSuccess(true);
+        
+        // Auto-hide success message and switch to login after 2 seconds
+        setTimeout(() => {
+          setShowSuccess(false);
+          setIsLogin(true);
+          setFormData({ name: '', email: '', password: '', confirmPassword: '' });
+        }, 2000);
+
+      } else {
+        // Sign in
+        await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        onClose();
+      }
+    } catch (error: any) {
+      console.error('Authentication error:', error);
+      let errorMsg = 'An error occurred. Please try again.';
+      
+      if (error.code === 'auth/operation-not-allowed') {
+        errorMsg = 'Email/password authentication is not enabled. Please use Google sign-in for now.';
+        setEmailPasswordDisabled(true);
+      } else if (error.code === 'auth/email-already-in-use') {
+        errorMsg = 'This email is already registered. Please sign in instead.';
+      } else if (error.code === 'auth/weak-password') {
+        errorMsg = 'Password is too weak. Please choose a stronger password.';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMsg = 'Please enter a valid email address.';
+      } else if (error.code === 'auth/user-not-found') {
+        errorMsg = 'No account found with this email. Please sign up first.';
+      } else if (error.code === 'auth/wrong-password') {
+        errorMsg = 'Incorrect password. Please try again.';
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+      
+      setErrorMessage(errorMsg);
       setShowError(true);
-      // Auto-hide error after 3 seconds
-      setTimeout(() => setShowError(false), 3000);
-      return;
+      setTimeout(() => setShowError(false), 5000);
+    } finally {
+      setIsLoading(false);
     }
-    // Add your authentication logic here
-    console.log('Form submitted:', formData);
-    // Only close if validation passes
-    onClose();
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -69,9 +146,30 @@ const handleGoogleSignIn = async () => {
         // Close modal first for better UX
         onClose();
         
-        // Then update user in background
+        // Then update user in background with proper display name handling
         try {
-          await createOrUpdateUser(result.user);
+          // First, try to get the existing user data from database
+          let existingUser = null;
+          try {
+            existingUser = await getUserByUid(result.user.uid);
+          } catch (error) {
+            // User doesn't exist in database yet, that's fine
+            console.log('User not found in database, will create new user');
+          }
+          
+          // Use existing display name if available, otherwise use Google's display name
+          const displayName = existingUser?.displayName || result.user.displayName;
+          
+          console.log('🔍 Display name resolution:', {
+            existingUserDisplayName: existingUser?.displayName,
+            googleDisplayName: result.user.displayName,
+            finalDisplayName: displayName
+          });
+          
+          await createOrUpdateUser({
+            ...result.user,
+            displayName: displayName
+          });
         } catch (error) {
           console.error('Error updating user:', error);
           // User is still signed in even if this fails
@@ -133,8 +231,35 @@ const handleGoogleSignIn = async () => {
             </div>
           )}
 
+          {/* Success Message */}
+          {showSuccess && successMessage && (
+            <div className="animate-in slide-in-from-top-2 fade-in duration-200 absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
+              <div className="flex items-center space-x-2 bg-green-50 border border-green-200 px-4 py-2 rounded-lg shadow-lg">
+                <svg className="h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                <p className="text-green-600 text-sm font-medium">{successMessage}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Email/Password Disabled Notice */}
+          {emailPasswordDisabled && (
+            <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center space-x-2">
+                <svg className="h-5 w-5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <p className="text-yellow-800 font-medium text-sm">Email/Password Authentication Disabled</p>
+                  <p className="text-yellow-700 text-xs mt-1">Please use Google sign-in below to create your account.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Form */}
-          <div className="space-y-4">
+          <div className={`space-y-4 ${emailPasswordDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
             {!isLogin && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -232,11 +357,32 @@ const handleGoogleSignIn = async () => {
 
             <button
               onClick={handleSubmit}
-              className="w-full text-white font-semibold py-3 rounded-xl transition-all duration-200 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-600 shadow-md"
+              disabled={isLoading || emailPasswordDisabled}
+              className={`w-full text-white font-semibold py-3 rounded-xl transition-all duration-200 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98] shadow-md ${
+                isLoading || emailPasswordDisabled ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
               style={{ backgroundColor: theme.primary }}
             >
-              {isLogin ? 'Login' : 'Create Account'}
+              {isLoading ? (
+                <div className="flex items-center justify-center space-x-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>{isLogin ? 'Signing in...' : 'Creating account...'}</span>
+                </div>
+              ) : emailPasswordDisabled ? (
+                'Use Google Sign-in Below'
+              ) : (
+                isLogin ? 'Login' : 'Create Account'
+              )}
             </button>
+
+            {/* Alternative sign-in suggestion */}
+            {!isLogin && (
+              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-blue-700 text-sm text-center">
+                  <strong>Tip:</strong> For the best experience, use Google sign-in below
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Divider */}
@@ -254,7 +400,11 @@ const handleGoogleSignIn = async () => {
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              className="w-full flex items-center justify-center space-x-2 py-3 border-2 border-gray-300 rounded-xl hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100 transition-all duration-200 shadow-sm"
+              className={`w-full flex items-center justify-center space-x-2 py-3 border-2 rounded-xl transition-all duration-200 shadow-sm ${
+                emailPasswordDisabled 
+                  ? 'border-blue-300 bg-blue-50 hover:bg-blue-100 hover:border-blue-400 shadow-md' 
+                  : 'border-gray-300 hover:bg-gray-50 hover:border-gray-400 active:bg-gray-100'
+              }`}
             >
               <svg className="h-5 w-5" viewBox="0 0 24 24">
                 <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -262,7 +412,9 @@ const handleGoogleSignIn = async () => {
                 <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
                 <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
               </svg>
-              <span className="text-sm font-medium text-gray-700">Continue with Google</span>
+              <span className={`text-sm font-medium ${emailPasswordDisabled ? 'text-blue-700' : 'text-gray-700'}`}>
+                {emailPasswordDisabled ? 'Sign up with Google' : 'Continue with Google'}
+              </span>
             </button>
           </div>
 

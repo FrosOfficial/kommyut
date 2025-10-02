@@ -966,7 +966,7 @@ const RoutesTab: React.FC = () => {
             { name: 'Bus', icon: '🚌', color: 'bg-blue-500', available: fareData.pubTables?.length > 0 },
             { name: 'MRT', icon: '🚇', color: 'bg-green-500', available: true },
             { name: 'LRT', icon: '🚊', color: 'bg-purple-500', available: true },
-            { name: 'PNR', icon: '🚆', color: 'bg-red-500', available: true },
+            { name: 'Trike', icon: '🛺', color: 'bg-red-500', available: true },
           ].map(mode => (
             <div key={mode.name} className={`p-4 rounded-xl border-2 transition-all ${mode.available ? 'hover:shadow-md cursor-pointer' : 'opacity-50'}`}>
               <div className="text-center">
@@ -983,44 +983,6 @@ const RoutesTab: React.FC = () => {
         </div>
       </div>
 
-      {/* Data Analytics Section */}
-      <div className="bg-gradient-to-br from-indigo-50 to-purple-50 rounded-2xl shadow-lg p-5">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
-          <Activity className="h-5 w-5 text-indigo-500 mr-2" />
-          Transit Analytics
-        </h3>
-        
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white/70 backdrop-blur rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-indigo-600">{gtfsData.stops.length}</div>
-            <div className="text-sm text-gray-600">Transit Stops</div>
-          </div>
-          <div className="bg-white/70 backdrop-blur rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-purple-600">{gtfsData.routes.length}</div>
-            <div className="text-sm text-gray-600">Routes</div>
-          </div>
-          <div className="bg-white/70 backdrop-blur rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-green-600">
-              {(fareData.pubTables?.length > 0 ? 1 : 0) + (fareData.pujTable?.length > 0 ? 1 : 0) + 4}
-            </div>
-            <div className="text-sm text-gray-600">Fare Systems</div>
-          </div>
-          <div className="bg-white/70 backdrop-blur rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-orange-600">Live</div>
-            <div className="text-sm text-gray-600">Database</div>
-          </div>
-        </div>
-        
-        <div className="mt-4 p-3 bg-white/50 rounded-xl">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-600">Data freshness</span>
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-              <span className="text-green-600 font-medium">Live & Updated</span>
-            </div>
-          </div>
-        </div>
-      </div>
     </>
   );
 };

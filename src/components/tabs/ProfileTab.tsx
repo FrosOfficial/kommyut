@@ -64,7 +64,7 @@ const ProfileTab: React.FC<ProfileTabProps> = ({ userPoints }) => {
           </div>
           <div>
             <h2 className="text-2xl font-bold">
-              {currentUser ? (currentUser.displayName || currentUser.email) : 'Guest User'}
+              {currentUser ? ((currentUser as any).customDisplayName || currentUser.displayName || currentUser.email) : 'Guest User'}
             </h2>
             <p className="text-blue-100">Commuter Level: Bronze</p>
             <div className="flex items-center space-x-2 mt-2">

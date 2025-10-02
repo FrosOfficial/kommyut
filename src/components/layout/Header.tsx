@@ -63,10 +63,10 @@ const Header: React.FC<HeaderProps> = ({
               <div className="flex items-center space-x-3">
                 <div className="flex items-center space-x-2 bg-gray-100 py-2 px-3 rounded-lg">
                   <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center">
-                    <span className="text-white font-semibold">{(currentUser.displayName || currentUser.email)?.charAt(0).toUpperCase()}</span>
+                    <span className="text-white font-semibold">{((currentUser as any).customDisplayName || currentUser.displayName || currentUser.email)?.charAt(0).toUpperCase()}</span>
                   </div>
                   <div>
-                    <div className="font-semibold text-gray-800">{currentUser.displayName || currentUser.email}</div>
+                    <div className="font-semibold text-gray-800">{(currentUser as any).customDisplayName || currentUser.displayName || currentUser.email}</div>
                     <div className="text-xs text-gray-500">Signed in</div>
                   </div>
                 </div>

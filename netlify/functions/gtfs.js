@@ -1,4 +1,4 @@
-const { Pool } = require('pg');
+import { Pool } from 'pg';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -21,7 +21,7 @@ const response = (statusCode, body) => ({
   body: JSON.stringify(body)
 });
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return response(200, {});
