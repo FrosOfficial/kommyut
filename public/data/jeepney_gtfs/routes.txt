@@ -1,0 +1,3 @@
+route_id,agency_id,route_short_name,route_long_name,route_type
+PRC01,JEEP01,PRC Jeepney,The Beacon to Mapua Makati University,3
+PRC02,JEEP01,PRC Jeepney,Waltermart Makati to Mapua Makati University,3

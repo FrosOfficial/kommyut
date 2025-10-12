@@ -18,11 +18,19 @@ const KommyutApp: React.FC = () => {
     isSearching,
     showNotifications,
     setShowNotifications,
-    savedRoutes,
     userPoints,
-    currentTrip,
     handleTabChange,
   } = useKommyut();
+
+  // Initialize dark mode from localStorage on app load
+  React.useEffect(() => {
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, []);
 
   // State for pre-filling route search from saved routes
   const [routeSearchFrom, setRouteSearchFrom] = React.useState<string>('');
@@ -42,10 +50,10 @@ const KommyutApp: React.FC = () => {
         <RoutesTab initialFrom={routeSearchFrom} initialTo={routeSearchTo} />
       </div>
       <div style={{ display: activeTab === 'saved' ? 'block' : 'none' }}>
-        <SavedTab savedRoutes={savedRoutes} onRouteSelect={handleSavedRouteSelect} />
+        <SavedTab onRouteSelect={handleSavedRouteSelect} />
       </div>
       <div style={{ display: activeTab === 'activity' ? 'block' : 'none' }}>
-        <ActivityTab currentTrip={currentTrip} />
+        <ActivityTab />
       </div>
       <div style={{ display: activeTab === 'profile' ? 'block' : 'none' }}>
         <ProfileTab userPoints={userPoints} />

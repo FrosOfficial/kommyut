@@ -1,0 +1,9 @@
+stop_id,stop_name,stop_lat,stop_lon
+WALTERMART,Waltermart Makati,14.550974828614073,121.01355776596284
+
+BEACON,The Beacon Makati,14.551738780383332,121.01363321843144
+
+SHOPWISE,Shopwise Chino Roces Makati,14.566866,121.013322
+
+MAPUA,Mapua University Makati,14.566388,121.015499
+

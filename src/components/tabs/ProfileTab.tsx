@@ -1,581 +1,493 @@
-// my-app/src/components/tabs/ProfileTab.tsx
-
 import React, { useState, useEffect } from 'react';
-import {
-  User, Award, BarChart3, Wallet, Info, ChevronRight, Edit2, Camera, Lock, X, Check, Moon, Sun
-} from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { User, Settings, Camera, Edit2, Moon, Sun, Save, X, Lock, Trophy } from 'lucide-react';
+import { updateProfile, updatePassword } from 'firebase/auth';
+import { auth } from '../../config/firebase';
+import * as api from '../../services/api';
 import { getCommuterLevel, getLevelProgress } from '../../utils/commuterLevel';
-import { getUserByUid, getUserTripStats } from '../../services/api';
-import { updateProfile, updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { auth, storage } from '../../config/firebase';
+import LoginPrompt from '../common/LoginPrompt';
 
-// Type definitions
-interface Setting {
-  icon: React.ComponentType<React.SVGProps<SVGSVGElement>>;
-  label: string;
-  value: string;
-}
-
-
-interface ProfileTabProps {
-  userPoints: number;
-}
-
-interface UserData {
-  points: number;
-  display_name?: string;
-  email?: string;
-}
-
-interface TripStats {
-  total_trips: number;
-  total_distance: number;
-  total_saved: number;
-  total_points: number;
-  completed_trips: number;
-}
-
-// Theme colors based on logo
-const theme = {
-  primary: '#2B5F88',
-  primaryDark: '#1E4463',
-  primaryLight: '#3B7FB8',
-  secondary: '#4A90C2',
-  accent: '#5BA3D5',
-  success: '#10B981',
-  warning: '#F59E0B',
-  danger: '#EF4444',
-};
-
-// ==================== PROFILE TAB ====================
-const ProfileTab: React.FC<ProfileTabProps> = ({ userPoints }) => {
+const ProfileTab: React.FC = () => {
   const { currentUser } = useAuth();
-  const [userData, setUserData] = useState<UserData | null>(null);
-  const [tripStats, setTripStats] = useState<TripStats>({
-    total_trips: 0,
-    total_distance: 0,
-    total_saved: 0,
-    total_points: 0,
-    completed_trips: 0
-  });
-  const [, setLoading] = useState(true);
-
-  // Edit profile states
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editType, setEditType] = useState<'name' | 'password' | 'photo' | null>(null);
-  const [newDisplayName, setNewDisplayName] = useState('');
-  const [currentPassword, setCurrentPassword] = useState('');
+  const [isDarkMode, setIsDarkMode] = useState(
+    document.documentElement.classList.contains('dark')
+  );
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [isEditingPassword, setIsEditingPassword] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState(currentUser?.displayName || '');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [uploading, setUploading] = useState(false);
-  const [updating, setUpdating] = useState(false);
-
-  // Dark mode state
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('darkMode');
-    return saved ? JSON.parse(saved) : false;
-  });
+  const [profileImageUrl, setProfileImageUrl] = useState(currentUser?.photoURL || '');
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [userPoints, setUserPoints] = useState(0);
 
   useEffect(() => {
-    const fetchUserData = async () => {
-      if (!currentUser) {
-        setLoading(false);
-        return;
-      }
+    const loadUserData = async () => {
+      if (!currentUser) return;
 
       try {
-        // Fetch user data from database
-        const userDataResponse = await getUserByUid(currentUser.uid);
-        setUserData(userDataResponse);
-
-        // Fetch trip stats
-        const statsData = await getUserTripStats(currentUser.uid, 'month');
-        setTripStats(statsData);
+        const userData = await api.getUserByUid(currentUser.uid);
+        setUserPoints(userData.points || 0);
       } catch (error) {
-        console.error('Error fetching user data:', error);
-      } finally {
-        setLoading(false);
+        console.error('Error loading user data:', error);
       }
     };
 
-    fetchUserData();
+    loadUserData();
+
+    // Auto-refresh user points every 5 seconds to show updates from completed trips
+    const intervalId = setInterval(() => {
+      if (currentUser) {
+        loadUserData();
+      }
+    }, 5000);
+
+    // Cleanup interval on unmount
+    return () => clearInterval(intervalId);
   }, [currentUser]);
 
-  // Apply dark mode to document
-  useEffect(() => {
-    if (darkMode) {
+  const toggleDarkMode = () => {
+    const newDarkMode = !isDarkMode;
+    setIsDarkMode(newDarkMode);
+
+    if (newDarkMode) {
       document.documentElement.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
     } else {
       document.documentElement.classList.remove('dark');
-    }
-    localStorage.setItem('darkMode', JSON.stringify(darkMode));
-  }, [darkMode]);
-
-  // Toggle dark mode
-  const toggleDarkMode = () => {
-    setDarkMode(!darkMode);
-    showToast(`Dark mode ${!darkMode ? 'enabled' : 'disabled'}`, 'success');
-  };
-
-  // Use database points if available, otherwise fall back to prop
-  const actualUserPoints = userData?.points ?? userPoints;
-
-  // Calculate commuter level and progress
-  const commuterLevel = getCommuterLevel(actualUserPoints);
-  const levelProgress = getLevelProgress(actualUserPoints);
-
-  // Handle profile photo upload
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || !e.target.files[0] || !currentUser) return;
-
-    const file = e.target.files[0];
-    setUploading(true);
-
-    try {
-      // Get the actual Firebase auth user
-      const firebaseUser = auth.currentUser;
-      if (!firebaseUser) {
-        showToast('Not authenticated', 'error');
-        return;
-      }
-
-      // Upload to Firebase Storage
-      const storageRef = ref(storage, `profile-photos/${currentUser.uid}`);
-      await uploadBytes(storageRef, file);
-      const photoURL = await getDownloadURL(storageRef);
-
-      // Update Firebase Auth profile
-      await updateProfile(firebaseUser, { photoURL });
-
-      // Show success toast
-      showToast('Profile photo updated!', 'success');
-
-      // Reload page to reflect changes
-      setTimeout(() => window.location.reload(), 1000);
-    } catch (error) {
-      console.error('Error uploading photo:', error);
-      showToast('Failed to upload photo', 'error');
-    } finally {
-      setUploading(false);
+      localStorage.setItem('theme', 'light');
     }
   };
 
-  // Handle display name update
   const handleUpdateDisplayName = async () => {
     if (!currentUser || !newDisplayName.trim()) return;
 
-    setUpdating(true);
     try {
-      // Get the actual Firebase auth user
-      const firebaseUser = auth.currentUser;
-      if (!firebaseUser) {
-        showToast('Not authenticated', 'error');
-        return;
-      }
+      await updateProfile(currentUser, {
+        displayName: newDisplayName.trim()
+      });
 
-      await updateProfile(firebaseUser, { displayName: newDisplayName });
-      showToast('Name updated successfully!', 'success');
-      setShowEditModal(false);
-      setNewDisplayName('');
-      setTimeout(() => window.location.reload(), 1000);
-    } catch (error) {
-      console.error('Error updating name:', error);
-      showToast('Failed to update name', 'error');
-    } finally {
-      setUpdating(false);
+      setSuccessMessage('Display name updated successfully!');
+      setIsEditingName(false);
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error: any) {
+      setErrorMessage(error.message || 'Failed to update display name');
+      setTimeout(() => setErrorMessage(''), 3000);
     }
   };
 
-  // Handle password update
   const handleUpdatePassword = async () => {
-    if (!currentUser || !currentUser.email) return;
-
-    if (newPassword !== confirmPassword) {
-      showToast('Passwords do not match', 'error');
-      return;
-    }
+    if (!currentUser) return;
 
     if (newPassword.length < 6) {
-      showToast('Password must be at least 6 characters', 'error');
+      setErrorMessage('Password must be at least 6 characters');
+      setTimeout(() => setErrorMessage(''), 3000);
       return;
     }
 
-    setUpdating(true);
+    if (newPassword !== confirmPassword) {
+      setErrorMessage('Passwords do not match');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
     try {
-      // Get the actual Firebase auth user
-      const firebaseUser = auth.currentUser;
-      if (!firebaseUser || !firebaseUser.email) {
-        showToast('Not authenticated', 'error');
-        return;
-      }
-
-      // Re-authenticate user first
-      const credential = EmailAuthProvider.credential(firebaseUser.email, currentPassword);
-      await reauthenticateWithCredential(firebaseUser, credential);
-
-      // Update password
-      await updatePassword(firebaseUser, newPassword);
-
-      showToast('Password updated successfully!', 'success');
-      setShowEditModal(false);
-      setCurrentPassword('');
+      await updatePassword(currentUser, newPassword);
+      setSuccessMessage('Password updated successfully!');
+      setIsEditingPassword(false);
       setNewPassword('');
       setConfirmPassword('');
+      setTimeout(() => setSuccessMessage(''), 3000);
     } catch (error: any) {
-      console.error('Error updating password:', error);
-      if (error.code === 'auth/wrong-password') {
-        showToast('Current password is incorrect', 'error');
+      if (error.code === 'auth/requires-recent-login') {
+        setErrorMessage('Please log out and log in again before changing your password');
       } else {
-        showToast('Failed to update password', 'error');
+        setErrorMessage(error.message || 'Failed to update password');
       }
-    } finally {
-      setUpdating(false);
+      setTimeout(() => setErrorMessage(''), 5000);
     }
   };
 
-  // Show toast notification
-  const showToast = (message: string, type: 'success' | 'error') => {
-    const toast = document.createElement('div');
-    toast.className = 'fixed top-4 right-4 z-50 animate-slide-in';
-    toast.innerHTML = `
-      <div class="bg-gradient-to-r ${type === 'success' ? 'from-green-500 to-emerald-600' : 'from-red-500 to-red-600'} text-white rounded-2xl shadow-2xl p-4 max-w-md">
-        <p class="text-sm font-medium">${message}</p>
-      </div>
-    `;
-    document.body.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.3s ease-out';
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    // Check file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      setErrorMessage('Image must be less than 2MB');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    // Check file type
+    if (!file.type.startsWith('image/')) {
+      setErrorMessage('File must be an image');
+      setTimeout(() => setErrorMessage(''), 3000);
+      return;
+    }
+
+    setIsUploadingImage(true);
+
+    try {
+      // Convert image to base64
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64String = reader.result as string;
+
+        try {
+          await updateProfile(currentUser, {
+            photoURL: base64String
+          });
+
+          setProfileImageUrl(base64String);
+          setSuccessMessage('Profile picture updated successfully!');
+          setTimeout(() => setSuccessMessage(''), 3000);
+        } catch (error: any) {
+          setErrorMessage(error.message || 'Failed to update profile picture');
+          setTimeout(() => setErrorMessage(''), 3000);
+        } finally {
+          setIsUploadingImage(false);
+        }
+      };
+      reader.readAsDataURL(file);
+    } catch (error: any) {
+      setErrorMessage('Failed to read image file');
+      setTimeout(() => setErrorMessage(''), 3000);
+      setIsUploadingImage(false);
+    }
   };
 
-  const settings: Setting[] = [
-    { icon: Info, label: 'About', value: 'v1.0.2' }
-  ];
+  if (!currentUser) {
+    return (
+      <LoginPrompt
+        icon={User}
+        title="Profile"
+        description="Manage your account and preferences"
+        gradientFrom="from-indigo-500"
+        gradientTo="to-blue-600"
+        onLoginClick={() => {
+          // Trigger login modal from header
+          document.querySelector<HTMLButtonElement>('[data-login-button]')?.click();
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      {/* User Profile Header */}
-      <div className="rounded-2xl p-6 text-white"
-           style={{background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`}}>
-        <div className="flex items-center space-x-4">
-          <div className="relative w-20 h-20">
-            <div className="w-20 h-20 bg-white/20 backdrop-blur rounded-full flex items-center justify-center">
-              {currentUser?.photoURL ? (
-                <img
-                  src={currentUser.photoURL}
-                  alt={currentUser.displayName || 'Profile'}
-                  className="w-20 h-20 rounded-full object-cover"
-                />
-              ) : (
-                <User className="h-10 w-10" />
-              )}
-            </div>
-            {currentUser && (
-              <label className="absolute bottom-0 right-0 w-7 h-7 bg-white rounded-full flex items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoUpload}
-                  className="hidden"
-                  disabled={uploading}
-                />
-                <Camera className="h-4 w-4" style={{ color: theme.primary }} />
-              </label>
-            )}
-          </div>
-          <div>
-            <h2 className="text-2xl font-bold">
-              {currentUser ? ((currentUser as any).customDisplayName || currentUser.displayName || currentUser.email) : 'Guest User'}
-            </h2>
-            <div className="flex items-center space-x-2">
-              <span className="text-2xl">{commuterLevel.icon}</span>
-              <p className="text-blue-100" style={{ color: commuterLevel.color }}>
-                Commuter Level: {commuterLevel.name}
-              </p>
-            </div>
-            <div className="flex items-center space-x-2 mt-2">
-              <Award className="h-5 w-5 text-yellow-300" />
-              <span className="font-semibold">{actualUserPoints} Points</span>
-            </div>
-            
-            {/* Level Progress Bar */}
-            {levelProgress.nextLevel && (
-              <div className="mt-3">
-                <div className="flex justify-between text-sm text-blue-100 mb-1">
-                  <span>Progress to {levelProgress.nextLevel.name}</span>
-                  <span>{levelProgress.pointsToNext} points to go</span>
-                </div>
-                <div className="w-full bg-white/20 rounded-full h-2">
-                  <div 
-                    className="h-2 rounded-full transition-all duration-300"
-                    style={{ 
-                      width: `${levelProgress.progressPercentage}%`,
-                      backgroundColor: commuterLevel.color 
-                    }}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Commute Stats */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 transition-colors">
-        <h3 className="text-lg font-semibold mb-4 dark:text-white">Commute Stats</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="rounded-xl p-4 text-center dark:bg-gray-700 transition-colors" style={{ backgroundColor: `${theme.primary}10` }}>
-            <BarChart3 className="h-8 w-8 mx-auto mb-2" color={theme.primary} />
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">{tripStats.total_trips}</p>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Trips this month</p>
-          </div>
-          <div className="bg-green-50 dark:bg-green-900/30 rounded-xl p-4 text-center transition-colors">
-            <Wallet className="h-8 w-8 text-green-600 dark:text-green-400 mx-auto mb-2" />
-            <p className="text-2xl font-bold text-gray-900 dark:text-white">₱{Math.round(tripStats.total_saved)}</p>
-            <p className="text-sm text-gray-600 dark:text-gray-400">Money saved</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Settings */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 transition-colors">
-        <h3 className="text-lg font-semibold mb-4 dark:text-white">Settings</h3>
-        <div className="space-y-3">
-          {currentUser && (
-            <>
-              <button
-                onClick={() => {
-                  setEditType('name');
-                  setNewDisplayName(currentUser.displayName || '');
-                  setShowEditModal(true);
-                }}
-                className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-all"
-              >
-                <div className="flex items-center space-x-3">
-                  <Edit2 className="h-5 w-5" style={{ color: theme.primary }} />
-                  <span className="font-medium text-gray-900 dark:text-white">Edit Display Name</span>
-                </div>
-                <ChevronRight className="h-4 w-4 text-gray-400 dark:text-gray-500" />
-              </button>
-
-              {/* Only show password change for email/password users (not Google sign-in) */}
-              {currentUser.providerData.some(provider => provider.providerId === 'password') && (
-                <button
-                  onClick={() => {
-                    setEditType('password');
-                    setShowEditModal(true);
-                  }}
-                  className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-all"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Lock className="h-5 w-5" style={{ color: theme.primary }} />
-                    <span className="font-medium text-gray-900 dark:text-white">Change Password</span>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-gray-400 dark:text-gray-500" />
-                </button>
-              )}
-            </>
-          )}
-
-          {/* Dark Mode Toggle */}
-          <button
-            onClick={toggleDarkMode}
-            className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-all"
-          >
-            <div className="flex items-center space-x-3">
-              {darkMode ? (
-                <Sun className="h-5 w-5" style={{ color: theme.warning }} />
-              ) : (
-                <Moon className="h-5 w-5" style={{ color: theme.primary }} />
-              )}
-              <span className="font-medium text-gray-900 dark:text-white">Dark Mode</span>
-            </div>
-            <div className="flex items-center space-x-2">
-              <div
-                className="relative w-12 h-6 rounded-full transition-colors cursor-pointer"
-                style={{ backgroundColor: darkMode ? theme.primary : '#D1D5DB' }}
-              >
-                <div
-                  className="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform"
-                  style={{ transform: darkMode ? 'translateX(24px)' : 'translateX(0)' }}
-                />
-              </div>
-            </div>
-          </button>
-
-          {settings.map((setting, i) => (
-            <button
-              key={i}
-              className="w-full flex items-center justify-between p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl transition-all"
-            >
-              <div className="flex items-center space-x-3">
-                <setting.icon className="h-5 w-5" style={{ color: theme.primary }} />
-                <span className="font-medium text-gray-900 dark:text-white">{setting.label}</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <span className="text-sm text-gray-500 dark:text-gray-400">{setting.value}</span>
-                <ChevronRight className="h-4 w-4 text-gray-400 dark:text-gray-500" />
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Edit Modal */}
-      {showEditModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-900">
-                  {editType === 'name' ? 'Edit Display Name' : 'Change Password'}
-                </h3>
-                <button
-                  onClick={() => {
-                    setShowEditModal(false);
-                    setEditType(null);
-                    setNewDisplayName('');
-                    setCurrentPassword('');
-                    setNewPassword('');
-                    setConfirmPassword('');
-                  }}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-6 w-6" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {editType === 'name' ? (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        New Display Name
-                      </label>
-                      <input
-                        type="text"
-                        value={newDisplayName}
-                        onChange={(e) => setNewDisplayName(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter new display name"
-                      />
-                    </div>
-
-                    <div className="flex space-x-3">
-                      <button
-                        onClick={() => {
-                          setShowEditModal(false);
-                          setEditType(null);
-                          setNewDisplayName('');
-                        }}
-                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleUpdateDisplayName}
-                        disabled={updating || !newDisplayName.trim()}
-                        className="flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
-                        style={{ backgroundColor: theme.primary }}
-                      >
-                        {updating ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            <span>Saving...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Check className="h-4 w-4" />
-                            <span>Save</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Current Password
-                      </label>
-                      <input
-                        type="password"
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter current password"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        New Password
-                      </label>
-                      <input
-                        type="password"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Enter new password (min 6 characters)"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Confirm New Password
-                      </label>
-                      <input
-                        type="password"
-                        value={confirmPassword}
-                        onChange={(e) => setConfirmPassword(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="Confirm new password"
-                      />
-                    </div>
-
-                    <div className="flex space-x-3">
-                      <button
-                        onClick={() => {
-                          setShowEditModal(false);
-                          setEditType(null);
-                          setCurrentPassword('');
-                          setNewPassword('');
-                          setConfirmPassword('');
-                        }}
-                        className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleUpdatePassword}
-                        disabled={updating || !currentPassword || !newPassword || !confirmPassword}
-                        className="flex-1 px-4 py-2 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center justify-center space-x-2"
-                        style={{ backgroundColor: theme.primary }}
-                      >
-                        {updating ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            <span>Updating...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Check className="h-4 w-4" />
-                            <span>Update Password</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
+    <div className="space-y-6 animate-fadeIn">
+      {/* Success/Error Messages */}
+      {successMessage && (
+        <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl p-4 animate-fadeIn">
+          <p className="text-green-600 dark:text-green-400 font-medium">{successMessage}</p>
         </div>
       )}
+
+      {errorMessage && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 animate-fadeIn">
+          <p className="text-red-600 dark:text-red-400 font-medium">{errorMessage}</p>
+        </div>
+      )}
+
+      {/* Profile Header */}
+      <div className="bg-gradient-to-r from-indigo-500 to-blue-600 rounded-2xl p-6 text-white shadow-xl transition-all duration-300 hover:shadow-2xl">
+        <div className="flex items-center space-x-4">
+          <div className="relative">
+            {currentUser.photoURL || profileImageUrl ? (
+              <img
+                src={profileImageUrl || currentUser.photoURL || ''}
+                alt={currentUser.displayName || 'User'}
+                className="w-20 h-20 rounded-full border-4 border-white shadow-lg object-cover"
+              />
+            ) : (
+              <div className="w-20 h-20 rounded-full bg-white/20 flex items-center justify-center">
+                <User className="h-10 w-10 text-white" />
+              </div>
+            )}
+
+            {/* Camera overlay button */}
+            <label className="absolute bottom-0 right-0 bg-white rounded-full p-2 cursor-pointer hover:bg-gray-100 transition-all duration-300 hover:scale-110 shadow-lg">
+              <Camera className="h-4 w-4 text-indigo-600" />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+                disabled={isUploadingImage}
+              />
+            </label>
+
+            {isUploadingImage && (
+              <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center">
+                <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <h2 className="text-2xl font-bold">
+              {currentUser.displayName || 'Kommuter'}
+            </h2>
+            <p className="text-blue-100">{currentUser.email}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Commuter Level */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 transition-colors animate-fadeIn" style={{ animationDelay: '0.1s' }}>
+        <div className="flex items-center space-x-3 mb-4">
+          <Trophy className="h-6 w-6 text-yellow-500 animate-bounce" />
+          <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+            Commuter Level
+          </h3>
+        </div>
+
+        {(() => {
+          const levelProgress = getLevelProgress(userPoints);
+          const { currentLevel, nextLevel, progressPercentage, pointsToNext } = levelProgress;
+
+          return (
+            <div className="space-y-4">
+              {/* Current Level */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <span className="text-3xl animate-bounce">{currentLevel.icon}</span>
+                  <div>
+                    <p className="text-xl font-bold" style={{ color: currentLevel.color }}>
+                      {currentLevel.name}
+                    </p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                      {currentLevel.description}
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-2xl font-bold text-gray-900 dark:text-white animate-pulse-slow">
+                    {userPoints}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">points</p>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              {nextLevel && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Progress to {nextLevel.name}
+                    </p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                      {pointsToNext} points to go
+                    </p>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500 ease-out"
+                      style={{
+                        width: `${progressPercentage}%`,
+                        background: `linear-gradient(to right, ${currentLevel.color}, ${nextLevel.color})`
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Max Level Badge */}
+              {!nextLevel && (
+                <div className="bg-gradient-to-r from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 border border-yellow-200 dark:border-yellow-700 rounded-xl p-4 text-center">
+                  <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                    🎉 You've reached the maximum level!
+                  </p>
+                </div>
+              )}
+
+              {/* Points Info */}
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-xl p-4">
+                <p className="text-sm text-indigo-900 dark:text-indigo-100 text-center">
+                  Complete trips to earn <span className="font-bold">10 points</span> each!
+                </p>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* Dark Mode Toggle */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 transition-colors">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            {isDarkMode ? (
+              <Moon className="h-6 w-6 text-gray-600 dark:text-gray-400" />
+            ) : (
+              <Sun className="h-6 w-6 text-gray-600 dark:text-gray-400" />
+            )}
+            <div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                Dark Mode
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {isDarkMode ? 'Enabled' : 'Disabled'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={toggleDarkMode}
+            className={`relative inline-flex h-8 w-14 items-center rounded-full transition-colors ${
+              isDarkMode ? 'bg-indigo-600' : 'bg-gray-300'
+            }`}
+          >
+            <span
+              className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${
+                isDarkMode ? 'translate-x-7' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* Settings Card */}
+      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 transition-colors">
+        <div className="flex items-center space-x-3 mb-4">
+          <Settings className="h-6 w-6 text-gray-600 dark:text-gray-400" />
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+            Account Settings
+          </h3>
+        </div>
+
+        <div className="space-y-4">
+          {/* Email (read-only) */}
+          <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-xl">
+            <p className="text-sm text-gray-500 dark:text-gray-400">Email</p>
+            <p className="font-medium text-gray-900 dark:text-white">
+              {currentUser.email}
+            </p>
+          </div>
+
+          {/* Display Name (editable) */}
+          <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-xl">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Display Name</p>
+              {!isEditingName && (
+                <button
+                  onClick={() => {
+                    setIsEditingName(true);
+                    setNewDisplayName(currentUser.displayName || '');
+                  }}
+                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+                >
+                  <Edit2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {isEditingName ? (
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={newDisplayName}
+                  onChange={(e) => setNewDisplayName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  placeholder="Enter display name"
+                />
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleUpdateDisplayName}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg flex items-center justify-center space-x-2"
+                  >
+                    <Save className="h-4 w-4" />
+                    <span>Save</span>
+                  </button>
+                  <button
+                    onClick={() => setIsEditingName(false)}
+                    className="flex-1 bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-900 dark:text-white py-2 rounded-lg flex items-center justify-center space-x-2"
+                  >
+                    <X className="h-4 w-4" />
+                    <span>Cancel</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="font-medium text-gray-900 dark:text-white">
+                {currentUser.displayName || 'Not set'}
+              </p>
+            )}
+          </div>
+
+          {/* Change Password */}
+          <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-xl">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm text-gray-500 dark:text-gray-400">Password</p>
+              {!isEditingPassword && (
+                <button
+                  onClick={() => setIsEditingPassword(true)}
+                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+                >
+                  <Edit2 className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {isEditingPassword ? (
+              <div className="space-y-2">
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    placeholder="New password (min 6 characters)"
+                  />
+                </div>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                  <input
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    placeholder="Confirm new password"
+                  />
+                </div>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={handleUpdatePassword}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg flex items-center justify-center space-x-2"
+                  >
+                    <Save className="h-4 w-4" />
+                    <span>Update Password</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsEditingPassword(false);
+                      setNewPassword('');
+                      setConfirmPassword('');
+                    }}
+                    className="flex-1 bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500 text-gray-900 dark:text-white py-2 rounded-lg flex items-center justify-center space-x-2"
+                  >
+                    <X className="h-4 w-4" />
+                    <span>Cancel</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="font-medium text-gray-900 dark:text-white">
+                ••••••••
+              </p>
+            )}
+          </div>
+
+          {/* User ID (read-only) */}
+          <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-xl">
+            <p className="text-sm text-gray-500 dark:text-gray-400">User ID</p>
+            <p className="font-mono text-xs text-gray-600 dark:text-gray-400 break-all">
+              {currentUser.uid}
+            </p>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

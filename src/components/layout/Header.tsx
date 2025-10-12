@@ -13,17 +13,20 @@ interface HeaderProps {
   setShowNotifications: (show: boolean) => void;
 }
 
-const Header: React.FC<HeaderProps> = ({ 
-  isOfflineMode, 
-  showNotifications, 
-  setShowNotifications 
+const Header: React.FC<HeaderProps> = ({
+  isOfflineMode,
+  showNotifications,
+  setShowNotifications
 }) => {
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const { currentUser } = useAuth();
 
   const handleSignOut = async () => {
     try {
       await signOut(auth);
+      // Reload the page to clear all user data and reset the app state
+      window.location.reload();
     } catch (error) {
       console.error('Error signing out:', error);
     }
@@ -56,7 +59,6 @@ const Header: React.FC<HeaderProps> = ({
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg relative transition-colors"
             >
               <Bell className="h-5 w-5 dark:text-white" style={{ color: theme.primary }} />
-              <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full" />
             </button>
 
             {currentUser ? (
@@ -71,15 +73,17 @@ const Header: React.FC<HeaderProps> = ({
                   </div>
                 </div>
                 <button
-                  onClick={handleSignOut}
+                  onClick={() => setShowLogoutModal(true)}
                   className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                  title="Log out"
                 >
                   <LogOut className="h-5 w-5 dark:text-white" style={{ color: theme.primary }} />
                 </button>
               </div>
             ) : (
-              <button 
+              <button
                 onClick={() => setShowLoginModal(true)}
+                data-login-button
                 className="px-4 py-2 text-white font-semibold rounded-lg hover:opacity-90 transition-all flex items-center space-x-2"
                 style={{ backgroundColor: theme.primary }}
               >
@@ -91,26 +95,13 @@ const Header: React.FC<HeaderProps> = ({
 
         {/* Notifications Dropdown */}
         {showNotifications && (
-          <div className="absolute right-4 top-16 w-80 bg-white rounded-xl shadow-lg border z-50">
+          <div className="absolute right-4 top-16 w-80 bg-white dark:bg-gray-800 rounded-xl shadow-lg border dark:border-gray-700 z-50 transition-colors">
             <div className="p-4">
-              <h3 className="font-semibold mb-3">Notifications</h3>
-              <div className="space-y-3">
-                <div className="flex items-start space-x-3 p-3 bg-blue-50 rounded-lg">
-                  <AlertCircle className="h-5 w-5 text-blue-600 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium">Route Update</p>
-                    <p className="text-xs text-gray-600">MRT Line 3 experiencing delays</p>
-                    <span className="text-xs text-blue-600">5 min ago</span>
-                  </div>
-                </div>
-                <div className="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-lg">
-                  <Star className="h-5 w-5 text-yellow-500 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium">Achievement Unlocked!</p>
-                    <p className="text-xs text-gray-600">You've completed 50 trips this month</p>
-                    <span className="text-xs text-gray-500">1 hour ago</span>
-                  </div>
-                </div>
+              <h3 className="font-semibold mb-3 text-gray-900 dark:text-white">Notifications</h3>
+              <div className="text-center py-8">
+                <Bell className="h-12 w-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+                <p className="text-gray-500 dark:text-gray-400">No notifications yet</p>
+                <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">We'll notify you about route updates and achievements</p>
               </div>
             </div>
           </div>
@@ -118,11 +109,54 @@ const Header: React.FC<HeaderProps> = ({
       </header>
 
       {/* Login Modal */}
-      <LoginModal 
-        isOpen={showLoginModal} 
-        onClose={() => setShowLoginModal(false)} 
+      <LoginModal
+        isOpen={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
         theme={theme}
       />
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] animate-fadeIn">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-slideUp transition-colors">
+            <div className="p-6">
+              {/* Icon */}
+              <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/20 flex items-center justify-center mx-auto mb-4">
+                <LogOut className="h-6 w-6 text-red-600 dark:text-red-400" />
+              </div>
+
+              {/* Title */}
+              <h2 className="text-2xl font-bold text-center text-gray-900 dark:text-white mb-2">
+                Log Out
+              </h2>
+
+              {/* Description */}
+              <p className="text-center text-gray-600 dark:text-gray-400 mb-6">
+                Are you sure you want to log out? Your recent searches and activity will be saved for when you return.
+              </p>
+
+              {/* Buttons */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setShowLogoutModal(false)}
+                  className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowLogoutModal(false);
+                    handleSignOut();
+                  }}
+                  className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
+                >
+                  Log Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

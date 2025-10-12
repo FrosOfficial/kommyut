@@ -1,178 +1,13 @@
-// Use Netlify Functions in production, localhost in development
-const API_URL = import.meta.env.PROD 
-  ? '/.netlify/functions' 
-  : 'http://localhost:5000/api';
+// Use Netlify Functions in both production and development (when using netlify dev)
+// For development: run `netlify dev` instead of `npm run dev`
+const API_URL = import.meta.env.PROD
+  ? '/.netlify/functions'
+  : '/.netlify/functions'; // Use Netlify Dev's proxy in development too
 
-// User API
-export const createOrUpdateUser = async (user: any) => {
-  try {
-    const response = await fetch(`${API_URL}/users`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        uid: user.uid,
-        email: user.email,
-        displayName: user.displayName,
-        photoURL: user.photoURL,
-      }),
-    });
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    
-    return await response.json(); 
-  } catch (error) {
-    console.error('Error creating/updating user:', error);
-    throw error;
-  }
-};
+// ============================================================================
+// GTFS API - Transit Data (Routes, Stops, etc.)
+// ============================================================================
 
-export const getUserByUid = async (uid: string) => {
-  try {
-    const response = await fetch(`${API_URL}/users/${uid}`);
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching user:', error);
-    throw error;
-  }
-};
-
-// Trip API
-export const startTrip = async (tripData: {
-  user_uid: string;
-  from_location: string;
-  to_location: string;
-  transit_type?: string;
-  route_name?: string;
-  distance_km?: number;
-  fare_paid?: number;
-  money_saved?: number;
-}) => {
-  try {
-    const response = await fetch(`${API_URL}/trips/start`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(tripData),
-    });
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error starting trip:', error);
-    throw error;
-  }
-};
-
-export const endTrip = async (tripId: number, end_time?: string) => {
-  try {
-    const response = await fetch(`${API_URL}/trips/${tripId}/end`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ end_time }),
-    });
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error ending trip:', error);
-    throw error;
-  }
-};
-
-export const getUserTrips = async (user_uid: string, limit = 50, offset = 0) => {
-  try {
-    const response = await fetch(`${API_URL}/trips/user/${user_uid}?limit=${limit}&offset=${offset}`);
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching user trips:', error);
-    throw error;
-  }
-};
-
-export const getActiveTrip = async (user_uid: string) => {
-  try {
-    const response = await fetch(`${API_URL}/trips/user/${user_uid}/active`);
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching active trip:', error);
-    throw error;
-  }
-};
-
-export const getUserTripStats = async (user_uid: string, period = 'week') => {
-  try {
-    const response = await fetch(`${API_URL}/trips/user/${user_uid}/stats?period=${period}`);
-
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching trip stats:', error);
-    throw error;
-  }
-};
-
-export const getPopularRoutes = async (limit = 3) => {
-  try {
-    const response = await fetch(`${API_URL}/trips/popular-routes?limit=${limit}`);
-
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching popular routes:', error);
-    throw error;
-  }
-};
-
-export const getDailyTripHistory = async (user_uid: string, days = 7) => {
-  try {
-    const response = await fetch(`${API_URL}/trips/user/${user_uid}/daily?days=${days}`);
-    
-    if (!response.ok) {
-      throw new Error('Network response was not ok');
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Error fetching daily trip history:', error);
-    throw error;
-  }
-};
-
-// GTFS API
 export const getAllStops = async () => {
   try {
     const response = await fetch(`${API_URL}/gtfs/stops`);
@@ -201,7 +36,7 @@ export const getGtfsRoutes = async () => {
 
 export const getGtfsStops = async (routeId?: string) => {
   try {
-    const url = routeId 
+    const url = routeId
       ? `${API_URL}/gtfs/routes/${routeId}/stops`
       : `${API_URL}/gtfs/stops`;
     const response = await fetch(url);
@@ -241,6 +76,32 @@ export const getRouteSchedule = async (routeId: string) => {
   }
 };
 
+export const getRouteShape = async (routeId: string) => {
+  try {
+    const response = await fetch(`${API_URL}/gtfs/routes/${routeId}/shape`);
+    if (!response.ok) {
+      // Shape data is optional - silently return empty array
+      return [];
+    }
+    return await response.json();
+  } catch (error) {
+    // Shape data is optional - return empty array instead of throwing
+    return [];
+  }
+};
+
+export const getTripShapes = async (fromStopId: string, toStopId: string) => {
+  try {
+    const response = await fetch(`${API_URL}/gtfs/trip-shapes/${fromStopId}/${toStopId}`);
+    if (!response.ok) {
+      return { segments: [] };
+    }
+    return await response.json();
+  } catch (error) {
+    return { segments: [] };
+  }
+};
+
 export const findRoutesBetweenStops = async (fromStopId: string, toStopId: string) => {
   try {
     console.log('API: Calling findRoutesBetweenStops with:', fromStopId, toStopId);
@@ -262,7 +123,10 @@ export const findRoutesBetweenStops = async (fromStopId: string, toStopId: strin
   }
 };
 
-// Fare API
+// ============================================================================
+// FARE API - Transit Fares
+// ============================================================================
+
 export const getFare = async (transitType: string, fromStation: string, toStation: string) => {
   try {
     const response = await fetch(`${API_URL}/fares/${transitType}/${fromStation}/${toStation}`);
@@ -341,21 +205,103 @@ export const getMaxDistances = async () => {
   }
 };
 
-// Saved Routes API
-export const getSavedRoutes = async (user_uid: string) => {
+// ============================================================================
+// GEOCODING API - Address Search
+// ============================================================================
+
+export interface GeocodingResult {
+  place_id: string;
+  display_name: string;
+  lat: string;
+  lon: string;
+  type: string;
+  address?: {
+    city?: string;
+    municipality?: string;
+    province?: string;
+    country?: string;
+  };
+}
+
+// ============================================================================
+// NEAREST STOP API
+// ============================================================================
+
+export const getNearestStops = async (
+  lat: number,
+  lon: number,
+  radius: number = 700,
+  limit: number = 5
+) => {
   try {
-    const response = await fetch(`${API_URL}/saved-routes/user/${user_uid}`);
+    const response = await fetch(
+      `${API_URL}/gtfs/nearest-stop?lat=${lat}&lon=${lon}&radius=${radius}&limit=${limit}`
+    );
+
     if (!response.ok) {
-      throw new Error('Failed to fetch saved routes');
+      throw new Error('Failed to find nearest stops');
     }
-    return await response.json();
+
+    const data = await response.json();
+    return data.stops || [];
   } catch (error) {
-    console.error('Error fetching saved routes:', error);
+    console.error('Error finding nearest stops:', error);
     throw error;
   }
 };
 
-export const saveRoute = async (routeData: {
+// ============================================================================
+// USER MANAGEMENT API
+// ============================================================================
+
+export interface UserData {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+}
+
+export const createOrUpdateUser = async (userData: UserData) => {
+  try {
+    const response = await fetch(`${API_URL}/users`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(userData),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to create or update user');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error creating/updating user:', error);
+    throw error;
+  }
+};
+
+export const getUserByUid = async (uid: string) => {
+  try {
+    const response = await fetch(`${API_URL}/users/${uid}`);
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch user');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching user:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
+// SAVED ROUTES API
+// ============================================================================
+
+export interface SavedRouteData {
   user_uid: string;
   name: string;
   from_stop_id: string;
@@ -365,7 +311,9 @@ export const saveRoute = async (routeData: {
   route_id?: string;
   route_name?: string;
   transit_type?: string;
-}) => {
+}
+
+export const saveRoute = async (routeData: SavedRouteData) => {
   try {
     const response = await fetch(`${API_URL}/saved-routes`, {
       method: 'POST',
@@ -376,8 +324,7 @@ export const saveRoute = async (routeData: {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Failed to save route');
+      throw new Error('Failed to save route');
     }
 
     return await response.json();
@@ -387,47 +334,24 @@ export const saveRoute = async (routeData: {
   }
 };
 
-export const updateSavedRoute = async (id: number, updates: { name?: string; times_used?: number }) => {
+export const getSavedRoutes = async (userUid: string) => {
   try {
-    const response = await fetch(`${API_URL}/saved-routes/${id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(updates),
-    });
+    const response = await fetch(`${API_URL}/saved-routes/${userUid}`);
 
     if (!response.ok) {
-      throw new Error('Failed to update saved route');
+      throw new Error('Failed to fetch saved routes');
     }
 
     return await response.json();
   } catch (error) {
-    console.error('Error updating saved route:', error);
+    console.error('Error fetching saved routes:', error);
     throw error;
   }
 };
 
-export const incrementRouteUsage = async (id: number) => {
+export const deleteSavedRoute = async (routeId: number) => {
   try {
-    const response = await fetch(`${API_URL}/saved-routes/${id}/use`, {
-      method: 'POST',
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to increment route usage');
-    }
-
-    return await response.json();
-  } catch (error) {
-    console.error('Error incrementing route usage:', error);
-    throw error;
-  }
-};
-
-export const deleteSavedRoute = async (id: number) => {
-  try {
-    const response = await fetch(`${API_URL}/saved-routes/${id}`, {
+    const response = await fetch(`${API_URL}/saved-routes/${routeId}`, {
       method: 'DELETE',
     });
 
@@ -438,6 +362,174 @@ export const deleteSavedRoute = async (id: number) => {
     return await response.json();
   } catch (error) {
     console.error('Error deleting saved route:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
+// TRIPS API - User Trip Tracking
+// ============================================================================
+
+export interface TripData {
+  user_uid: string;
+  from_location: string;
+  to_location: string;
+  route_name?: string;
+  transit_type?: string;
+  distance_km?: number;
+  fare_paid?: number;
+}
+
+export interface Trip {
+  id: number;
+  user_uid: string;
+  from_location: string;
+  to_location: string;
+  route_name: string;
+  transit_type: string;
+  distance_km: number;
+  fare_paid: number;
+  status: string;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export const startTrip = async (tripData: TripData) => {
+  try {
+    const response = await fetch(`${API_URL}/trips`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(tripData),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to start trip');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error starting trip:', error);
+    throw error;
+  }
+};
+
+export const getActiveTrips = async (userUid: string) => {
+  try {
+    const response = await fetch(`${API_URL}/trips/active/${userUid}`);
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch active trips');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching active trips:', error);
+    throw error;
+  }
+};
+
+export const getCompletedTrips = async (userUid: string) => {
+  try {
+    const response = await fetch(`${API_URL}/trips/completed/${userUid}`);
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch completed trips');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching completed trips:', error);
+    throw error;
+  }
+};
+
+export const completeTrip = async (tripId: number) => {
+  try {
+    const response = await fetch(`${API_URL}/trips/${tripId}/complete`, {
+      method: 'PUT',
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to complete trip');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error completing trip:', error);
+    throw error;
+  }
+};
+
+export const getTripStats = async (userUid: string) => {
+  try {
+    const response = await fetch(`${API_URL}/trips/stats/${userUid}`);
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch trip stats');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching trip stats:', error);
+    throw error;
+  }
+};
+
+// ============================================================================
+// RECENT SEARCHES API
+// ============================================================================
+
+export interface RecentSearchData {
+  user_uid: string;
+  from_location: string;
+  to_location: string;
+  from_stop_id?: string;
+  to_stop_id?: string;
+}
+
+export interface RecentSearch {
+  id: number;
+  from_location: string;
+  to_location: string;
+  from_stop_id: string | null;
+  to_stop_id: string | null;
+  searched_at: string;
+}
+
+export const saveRecentSearch = async (searchData: RecentSearchData) => {
+  try {
+    const response = await fetch(`${API_URL}/recent-searches`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(searchData),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to save recent search');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error saving recent search:', error);
+    throw error;
+  }
+};
+
+export const getRecentSearches = async (userUid: string) => {
+  try {
+    const response = await fetch(`${API_URL}/recent-searches/${userUid}`);
+
+    if (!response.ok) {
+      throw new Error('Failed to fetch recent searches');
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error fetching recent searches:', error);
     throw error;
   }
 };

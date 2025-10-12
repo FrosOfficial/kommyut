@@ -1,299 +1,335 @@
-// my-app/src/components/tabs/ActivityTab.tsx
-
 import React, { useState, useEffect } from 'react';
-import {
-  Navigation, BarChart3, TrendingUp, CheckCircle2
-} from 'lucide-react';
+import { Activity, TrendingUp, MapPin, CheckCircle, Clock, Loader2, BarChart3 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { getActiveTrip, getUserTripStats, getDailyTripHistory, endTrip } from '../../services/api';
+import * as api from '../../services/api';
+import LoginPrompt from '../common/LoginPrompt';
 
-// Type definitions
-interface TripHistoryItem {
-  date: string;
-  trips: number;
-  distance: string;
-  saved: string;
-}
-
-interface TripData {
+interface Trip {
   id: number;
+  user_uid: string;
   from_location: string;
   to_location: string;
-  transit_type: string;
   route_name: string;
+  transit_type: string;
   distance_km: number;
   fare_paid: number;
-  money_saved: number;
-  points_earned: number;
-  start_time: string;
-  end_time?: string;
   status: string;
+  started_at: string;
+  completed_at: string | null;
 }
 
 interface TripStats {
   total_trips: number;
   total_distance: number;
-  total_saved: number;
-  total_points: number;
-  completed_trips: number;
+  total_spent: number;
 }
 
-interface ActivityTabProps {}
-
-// Theme colors based on logo
-const theme = {
-  primary: '#2B5F88',
-  primaryDark: '#1E4463',
-  primaryLight: '#3B7FB8',
-  secondary: '#4A90C2',
-  accent: '#5BA3D5',
-  success: '#10B981',
-  warning: '#F59E0B',
-  danger: '#EF4444',
-};
-
-// ==================== ACTIVITY TAB ====================
-const ActivityTab: React.FC<ActivityTabProps> = () => {
+const ActivityTab: React.FC = () => {
   const { currentUser } = useAuth();
-  const [activeTrip, setActiveTrip] = useState<TripData | null>(null);
-  const [tripStats, setTripStats] = useState<TripStats>({
-    total_trips: 0,
-    total_distance: 0,
-    total_saved: 0,
-    total_points: 0,
-    completed_trips: 0
-  });
-  const [tripHistory, setTripHistory] = useState<TripHistoryItem[]>([]);
+  const [activeTrips, setActiveTrips] = useState<Trip[]>([]);
+  const [completedTrips, setCompletedTrips] = useState<Trip[]>([]);
+  const [stats, setStats] = useState<TripStats>({ total_trips: 0, total_distance: 0, total_spent: 0 });
   const [loading, setLoading] = useState(true);
-  const [completingTrip, setCompletingTrip] = useState(false);
+  const [completingId, setCompletingId] = useState<number | null>(null);
 
-  const handleCompleteTrip = async () => {
-    if (!activeTrip || !currentUser) return;
+  useEffect(() => {
+    loadTrips(true); // Show loading on initial load
 
-    setCompletingTrip(true);
+    // Auto-refresh trips every 5 seconds to show new active trips
+    const intervalId = setInterval(() => {
+      if (currentUser) {
+        loadTrips(false); // Don't show loading spinner on auto-refresh
+      }
+    }, 5000);
+
+    // Cleanup interval on unmount
+    return () => clearInterval(intervalId);
+  }, [currentUser]);
+
+  const loadTrips = async (showLoading = false) => {
+    if (!currentUser) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      await endTrip(activeTrip.id);
-
-      // Show success notification
-      const successDiv = document.createElement('div');
-      successDiv.className = 'fixed top-4 right-4 z-50';
-      successDiv.innerHTML = `
-        <div class="bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-2xl shadow-2xl p-6 max-w-md">
-          <div class="flex items-start space-x-4">
-            <div class="flex-shrink-0">
-              <div class="w-12 h-12 bg-white bg-opacity-20 rounded-full flex items-center justify-center">
-                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
-              </div>
-            </div>
-            <div class="flex-1">
-              <h3 class="text-lg font-bold mb-1">🎉 Trip Completed!</h3>
-              <p class="text-sm text-white text-opacity-90 mb-2">You've earned ${activeTrip.points_earned || 0} points for this commute!</p>
-              <div class="flex items-center space-x-2 text-xs text-white text-opacity-75">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <span>Saved ₱${Number(activeTrip.money_saved || 0).toFixed(2)}</span>
-              </div>
-            </div>
-            <button onclick="this.parentElement.parentElement.remove()" class="text-white text-opacity-75 hover:text-opacity-100 transition-colors">
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(successDiv);
-
-      setTimeout(() => {
-        successDiv.style.opacity = '0';
-        successDiv.style.transition = 'opacity 0.3s ease-out';
-        setTimeout(() => successDiv.remove(), 300);
-      }, 5000);
-
-      // Refresh data
-      setActiveTrip(null);
-      const [statsData, dailyHistory] = await Promise.all([
-        getUserTripStats(currentUser.uid, 'week'),
-        getDailyTripHistory(currentUser.uid, 7)
+      if (showLoading) {
+        setLoading(true);
+      }
+      const [active, completed, tripStats] = await Promise.all([
+        api.getActiveTrips(currentUser.uid),
+        api.getCompletedTrips(currentUser.uid),
+        api.getTripStats(currentUser.uid)
       ]);
-      setTripStats(statsData);
-      const formattedHistory = dailyHistory.map((day: any) => ({
-        date: new Date(day.date).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric'
-        }),
-        trips: parseInt(day.trips),
-        distance: `${Math.round(day.distance)} km`,
-        saved: `₱${Math.round(day.saved)}`
-      }));
-      setTripHistory(formattedHistory);
+
+      setActiveTrips(active);
+      setCompletedTrips(completed);
+      setStats(tripStats);
     } catch (error) {
-      console.error('Error completing trip:', error);
-      alert('Failed to complete trip. Please try again.');
+      console.error('Error loading trips:', error);
     } finally {
-      setCompletingTrip(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   };
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!currentUser) {
-        setLoading(false);
-        return;
-      }
+  const handleCompleteTrip = async (tripId: number) => {
+    try {
+      setCompletingId(tripId);
+      await api.completeTrip(tripId);
+      // Reload trips to update UI
+      await loadTrips();
+    } catch (error) {
+      console.error('Error completing trip:', error);
+      alert('Failed to complete trip');
+    } finally {
+      setCompletingId(null);
+    }
+  };
 
-      try {
-        // Fetch active trip
-        const activeTripData = await getActiveTrip(currentUser.uid);
-        setActiveTrip(activeTripData);
+  const formatTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
 
-        // Fetch trip stats
-        const statsData = await getUserTripStats(currentUser.uid, 'week');
-        setTripStats(statsData);
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  };
 
-        // Fetch daily trip history
-        const dailyHistory = await getDailyTripHistory(currentUser.uid, 7);
-        const formattedHistory = dailyHistory.map((day: any) => ({
-          date: new Date(day.date).toLocaleDateString('en-US', { 
-            month: 'short', 
-            day: 'numeric' 
-          }),
-          trips: parseInt(day.trips),
-          distance: `${Math.round(day.distance)} km`,
-          saved: `₱${Math.round(day.saved)}`
-        }));
-        setTripHistory(formattedHistory);
-      } catch (error) {
-        console.error('Error fetching trip data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, [currentUser]);
-
-  if (loading) {
+  if (!currentUser) {
     return (
-      <div className="space-y-4">
-        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 transition-colors">
-          <div className="animate-pulse">
-            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4 transition-colors"></div>
-            <div className="space-y-3">
-              <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded transition-colors"></div>
-              <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded w-3/4 transition-colors"></div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <LoginPrompt
+        icon={Activity}
+        title="Activity"
+        description="Track your journey and earn rewards"
+        gradientFrom="from-blue-500"
+        gradientTo="to-purple-600"
+        onLoginClick={() => {
+          document.querySelector<HTMLButtonElement>('[data-login-button]')?.click();
+        }}
+      />
     );
   }
 
   return (
-    <div className="space-y-4">
-      {/* Current Trip Section */}
-      {activeTrip && (
-        <div 
-          className="text-white rounded-2xl shadow-lg p-5"
-          style={{background: `linear-gradient(135deg, ${theme.primary} 0%, ${theme.secondary} 100%)`}}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold">Current Trip</h3>
-            <div className="flex items-center space-x-1">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              <span className="text-sm">Active</span>
-            </div>
-          </div>
-          <div className="space-y-3">
-            <div className="flex items-center space-x-3">
-              <Navigation className="h-5 w-5" />
-              <div>
-                <p className="font-medium">En route to {activeTrip.to_location}</p>
-                <p className="text-sm opacity-90">Via {activeTrip.route_name || activeTrip.transit_type}</p>
-              </div>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span>Started: {new Date(activeTrip.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-              <span>Distance: {activeTrip.distance_km} km</span>
-            </div>
-            <div className="bg-white/20 rounded-lg h-2 overflow-hidden mb-4">
-              <div className="bg-white h-full w-3/4 transition-all" />
-            </div>
-            <button
-              onClick={handleCompleteTrip}
-              disabled={completingTrip}
-              className="w-full bg-white text-gray-900 font-semibold py-3 rounded-xl transition-all hover:shadow-lg disabled:opacity-50 flex items-center justify-center space-x-2"
-            >
-              {completingTrip ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-gray-400 border-t-gray-900 rounded-full animate-spin" />
-                  <span>Completing...</span>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 className="h-5 w-5" />
-                  <span>Complete Trip</span>
-                </>
-              )}
-            </button>
-          </div>
+    <div className="space-y-6 animate-fadeIn">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl p-6 text-white shadow-xl transition-all duration-300 hover:shadow-2xl">
+        <div className="flex items-center space-x-3 mb-2">
+          <Activity className="h-8 w-8 animate-bounce" />
+          <h2 className="text-2xl font-bold">Activity</h2>
         </div>
-      )}
+        <p className="text-blue-100">Your commute activity and insights</p>
+      </div>
 
-      {/* Trip History Section */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 transition-colors">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 transition-colors">Trip History</h3>
-        <div className="space-y-3">
-          {tripHistory.length > 0 ? (
-            tripHistory.map((day, i) => (
-              <div 
-                key={i} 
-                className="border-l-4 pl-4 py-2" 
-                style={{ borderColor: theme.primary }}
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-semibold text-gray-900 dark:text-white transition-colors">{day.date}</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 transition-colors">{day.trips} trips • {day.distance}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-green-600 font-semibold">{day.saved}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 transition-colors">saved</p>
-                  </div>
+      {loading ? (
+        <div className="bg-white dark:bg-gray-800 rounded-2xl p-12 text-center transition-colors">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto mb-3" />
+          <p className="text-gray-600 dark:text-gray-400">Loading activity...</p>
+        </div>
+      ) : (
+        <>
+          {/* Weekly Stats */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 transition-colors animate-fadeIn" style={{ animationDelay: '0.1s' }}>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center">
+              <BarChart3 className="h-5 w-5 mr-2 text-blue-600" />
+              Weekly Stats
+            </h3>
+            <div className="grid grid-cols-2 gap-4">
+              {/* Total Trips */}
+              <div className="bg-gray-50 dark:bg-gray-700 rounded-xl p-4 text-center transition-all hover:scale-105 cursor-default">
+                <TrendingUp className="h-8 w-8 text-blue-600 mx-auto mb-2" />
+                <div className="text-3xl font-bold text-gray-900 dark:text-white animate-pulse-slow">
+                  {stats.total_trips || 0}
                 </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Total Trips</div>
               </div>
-            ))
-          ) : (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400 transition-colors">
-              <p>No trip history yet</p>
-              <p className="text-sm">Start your first trip to see your activity here!</p>
+
+              {/* Total Spent - Removed money saved */}
+              <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-4 text-center transition-all hover:scale-105 cursor-default">
+                <div className="text-2xl mb-2">₱</div>
+                <div className="text-3xl font-bold text-gray-900 dark:text-white animate-pulse-slow">
+                  {stats.total_spent ? parseFloat(stats.total_spent.toString()).toFixed(0) : 0}
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Total Spent</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Active Trips */}
+          {activeTrips.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 transition-colors animate-fadeIn" style={{ animationDelay: '0.2s' }}>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
+                Active Trips
+                <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">
+                  {activeTrips.length} ongoing
+                </span>
+              </h3>
+
+              <div className="space-y-3">
+                {activeTrips.map((trip, index) => (
+                  <div
+                    key={trip.id}
+                    className="border-2 border-blue-200 dark:border-blue-800 rounded-xl p-4 bg-blue-50 dark:bg-blue-900/20 animate-fadeIn hover:shadow-lg transition-all duration-300"
+                    style={{ animationDelay: `${0.3 + index * 0.1}s` }}
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <Clock className="h-5 w-5 text-blue-600 animate-pulse" />
+                          <span className="font-semibold text-gray-900 dark:text-white">
+                            In Progress
+                          </span>
+                          <span className="text-sm text-gray-500 dark:text-gray-400">
+                            Started at {formatTime(trip.started_at)}
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          {/* Route */}
+                          <div className="flex items-center space-x-2 text-sm">
+                            <div className="flex items-center space-x-2">
+                              <MapPin className="h-4 w-4 text-green-600" />
+                              <span className="text-gray-700 dark:text-gray-300">
+                                {trip.from_location}
+                              </span>
+                            </div>
+                            <span className="text-gray-400">→</span>
+                            <div className="flex items-center space-x-2">
+                              <MapPin className="h-4 w-4 text-red-600" />
+                              <span className="text-gray-700 dark:text-gray-300">
+                                {trip.to_location}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Trip Details */}
+                          {trip.route_name && (
+                            <div className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-400">
+                              <span>{trip.route_name}</span>
+                              {trip.transit_type && (
+                                <span className="px-2 py-0.5 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 rounded-full text-xs font-medium">
+                                  {trip.transit_type}
+                                </span>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Fare */}
+                          {trip.fare_paid && (
+                            <div className="text-sm text-gray-600 dark:text-gray-400">
+                              Fare: ₱{parseFloat(trip.fare_paid.toString()).toFixed(2)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Complete Button */}
+                      <button
+                        onClick={() => handleCompleteTrip(trip.id)}
+                        disabled={completingId === trip.id}
+                        className="ml-4 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-all duration-300 hover:scale-105 active:scale-95 disabled:opacity-50 flex items-center space-x-2"
+                      >
+                        {completingId === trip.id ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            <span>Completing...</span>
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle className="h-4 w-4" />
+                            <span>Complete</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Weekly Stats Section */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5 transition-colors">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 transition-colors">Weekly Stats</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div
-            className="text-center p-4 rounded-xl transition-colors"
-            style={{ backgroundColor: `${theme.primary}10` }}
-          >
-            <BarChart3 className="h-8 w-8 mx-auto mb-2" color={theme.primary} />
-            <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors">{tripStats.total_trips}</p>
-            <p className="text-sm text-gray-600 dark:text-gray-400 transition-colors">Total Trips</p>
+          {/* Trip History */}
+          <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 transition-colors">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4">
+              Trip History
+            </h3>
+
+            {completedTrips.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-gray-600 dark:text-gray-400">
+                  {activeTrips.length > 0
+                    ? 'No trip history yet'
+                    : 'Start your first trip to see your activity here!'}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">
+                  Look for the "Start Journey" button when viewing routes
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {completedTrips.map((trip) => (
+                  <div
+                    key={trip.id}
+                    className="border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:shadow-md transition-all"
+                  >
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <div className="flex items-center space-x-2 mb-2">
+                          <CheckCircle className="h-5 w-5 text-green-600" />
+                          <span className="text-sm text-gray-500 dark:text-gray-400">
+                            Started: {formatTime(trip.started_at)} • Completed: {formatTime(trip.completed_at!)}
+                          </span>
+                        </div>
+
+                        <div className="space-y-2">
+                          {/* Route */}
+                          <div className="flex items-center space-x-2 text-sm">
+                            <div className="flex items-center space-x-2">
+                              <MapPin className="h-4 w-4 text-green-600" />
+                              <span className="text-gray-700 dark:text-gray-300">
+                                {trip.from_location}
+                              </span>
+                            </div>
+                            <span className="text-gray-400">→</span>
+                            <div className="flex items-center space-x-2">
+                              <MapPin className="h-4 w-4 text-red-600" />
+                              <span className="text-gray-700 dark:text-gray-300">
+                                {trip.to_location}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Trip Details */}
+                          <div className="flex items-center space-x-3 text-sm text-gray-600 dark:text-gray-400">
+                            {trip.route_name && <span>{trip.route_name}</span>}
+                            {trip.transit_type && (
+                              <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full text-xs font-medium">
+                                {trip.transit_type}
+                              </span>
+                            )}
+                            {trip.fare_paid && (
+                              <span className="text-green-600 dark:text-green-400 font-medium">
+                                ₱{parseFloat(trip.fare_paid.toString()).toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="text-center p-4 bg-green-50 dark:bg-green-900 dark:bg-opacity-30 rounded-xl transition-colors">
-            <TrendingUp className="h-8 w-8 text-green-600 dark:text-green-400 mx-auto mb-2 transition-colors" />
-            <p className="text-2xl font-bold text-gray-900 dark:text-white transition-colors">₱{Math.round(tripStats.total_saved)}</p>
-            <p className="text-sm text-gray-600 dark:text-gray-400 transition-colors">Total Saved</p>
-          </div>
-        </div>
-      </div>
+        </>
+      )}
     </div>
   );
 };
