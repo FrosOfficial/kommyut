@@ -197,6 +197,15 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
   // Map visibility state - track which route maps are expanded
   const [expandedMaps, setExpandedMaps] = useState<Set<number>>(new Set());
 
+  // Login prompt modal state
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [loginPromptMessage, setLoginPromptMessage] = useState('');
+
+  // Route name modal state
+  const [showRouteNameModal, setShowRouteNameModal] = useState(false);
+  const [routeNameInput, setRouteNameInput] = useState('');
+  const [pendingSaveRoute, setPendingSaveRoute] = useState<{route: RouteResult, index: number} | null>(null);
+
 
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -848,7 +857,8 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
   // Trip tracking functions
   const handleRouteSelect = (route: RouteResult) => {
     if (!currentUser) {
-      alert("Please log in to start tracking your journey!");
+      setLoginPromptMessage('start tracking your journey');
+      setShowLoginPrompt(true);
       return;
     }
     setSelectedRoute(route);
@@ -939,24 +949,31 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
   };
 
   // Handle saving a route
-  const handleSaveRoute = async (route: RouteResult, index: number) => {
+  const handleSaveRoute = (route: RouteResult, index: number) => {
     if (!currentUser) {
-      alert("Please log in to save routes!");
+      setLoginPromptMessage('save routes');
+      setShowLoginPrompt(true);
       return;
     }
 
+    // Set default route name and show modal
+    setRouteNameInput(`${route.origin.stop_name} to ${route.destination.stop_name}`);
+    setPendingSaveRoute({ route, index });
+    setShowRouteNameModal(true);
+  };
+
+  // Confirm save route with custom name
+  const confirmSaveRoute = async () => {
+    if (!pendingSaveRoute || !currentUser || !routeNameInput.trim()) return;
+
+    const { route, index } = pendingSaveRoute;
     setSavingRouteIndex(index);
+    setShowRouteNameModal(false);
+
     try {
-      const routeName = prompt("Enter a name for this route:", `${route.origin.stop_name} to ${route.destination.stop_name}`);
-
-      if (!routeName) {
-        setSavingRouteIndex(null);
-        return;
-      }
-
       await api.saveRoute({
         user_uid: currentUser.uid,
-        name: routeName,
+        name: routeNameInput,
         from_stop_id: route.origin.stop_id,
         from_stop_name: route.origin.stop_name,
         to_stop_id: route.destination.stop_id,
@@ -1007,6 +1024,8 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
       alert("Failed to save route. Please try again.");
     } finally {
       setSavingRouteIndex(null);
+      setPendingSaveRoute(null);
+      setRouteNameInput('');
     }
   };
 
@@ -1663,6 +1682,56 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
         </div>
       </div>
 
+      {/* Login Prompt Modal */}
+      {showLoginPrompt && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] animate-fadeIn"
+          onClick={() => setShowLoginPrompt(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-slideUp transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              {/* Icon */}
+              <div className="w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center mx-auto mb-4">
+                <AlertCircle className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+              </div>
+
+              {/* Title */}
+              <h2 className="text-2xl font-bold text-center text-gray-900 dark:text-white mb-2">
+                Login Required
+              </h2>
+
+              {/* Description */}
+              <p className="text-center text-gray-600 dark:text-gray-400 mb-6">
+                Please log in to {loginPromptMessage}! Create an account or sign in to access this feature.
+              </p>
+
+              {/* Buttons */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => setShowLoginPrompt(false)}
+                  className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    setShowLoginPrompt(false);
+                    // Trigger login modal
+                    document.querySelector<HTMLButtonElement>('[data-login-button]')?.click();
+                  }}
+                  className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
+                >
+                  Log In
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Journey Start Confirmation Modal */}
       {showJourneyModal && selectedRoute && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1726,6 +1795,69 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
                     {isStartingTrip ? 'Starting...' : 'Yes, Start Journey!'}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Route Name Modal */}
+      {showRouteNameModal && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[9999] animate-fadeIn"
+          onClick={() => setShowRouteNameModal(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full mx-4 animate-slideUp transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              {/* Icon */}
+              <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/20 flex items-center justify-center mx-auto mb-4">
+                <Bookmark className="h-8 w-8 text-green-600 dark:text-green-400" />
+              </div>
+
+              {/* Title */}
+              <h2 className="text-2xl font-bold text-center text-gray-900 dark:text-white mb-2">
+                Name Your Route
+              </h2>
+
+              {/* Description */}
+              <p className="text-center text-gray-600 dark:text-gray-400 mb-6">
+                Give this route a memorable name for easy access later.
+              </p>
+
+              {/* Input */}
+              <div className="mb-6">
+                <input
+                  type="text"
+                  value={routeNameInput}
+                  onChange={(e) => setRouteNameInput(e.target.value)}
+                  placeholder="Enter route name..."
+                  className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-colors"
+                  autoFocus
+                />
+              </div>
+
+              {/* Buttons */}
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => {
+                    setShowRouteNameModal(false);
+                    setPendingSaveRoute(null);
+                    setRouteNameInput('');
+                  }}
+                  className="flex-1 px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmSaveRoute}
+                  disabled={!routeNameInput.trim()}
+                  className="flex-1 px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 disabled:hover:scale-100"
+                >
+                  Save Route
+                </button>
               </div>
             </div>
           </div>
