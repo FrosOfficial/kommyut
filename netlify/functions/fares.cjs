@@ -1,13 +1,24 @@
 const { Pool } = require('pg');
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
+let pool;
 
-const query = (text, params) => pool.query(text, params);
+try {
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+      rejectUnauthorized: false
+    }
+  });
+} catch (error) {
+  console.error('Failed to initialize database pool:', error);
+}
+
+const query = async (text, params) => {
+  if (!pool) {
+    throw new Error('Database pool not initialized');
+  }
+  return pool.query(text, params);
+};
 
 // Helper to create response
 const response = (statusCode, body) => ({
@@ -74,8 +85,20 @@ exports.handler = async (event) => {
     if (pujDistanceMatch && event.httpMethod === 'GET') {
       const distance = parseFloat(pujDistanceMatch[1]);
 
+      console.log('PUJ Distance request:', {
+        path,
+        matched: pujDistanceMatch[1],
+        parsed: distance,
+        isNaN: isNaN(distance)
+      });
+
       if (isNaN(distance) || distance < 0) {
-        return response(400, { error: 'Invalid distance parameter', received: pujDistanceMatch[1] });
+        return response(400, {
+          error: 'Invalid distance parameter',
+          received: pujDistanceMatch[1],
+          parsed: distance,
+          path: path
+        });
       }
 
       const fare = calculatePUJFare(distance);
