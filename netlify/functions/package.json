@@ -1,0 +1,10 @@
+{
+  "name": "kommyut-functions",
+  "version": "1.0.0",
+  "description": "Netlify serverless functions for Kommyut",
+  "type": "commonjs",
+  "dependencies": {
+    "web-push": "^3.6.7",
+    "pg": "^8.16.3"
+  }
+}

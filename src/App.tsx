@@ -1,14 +1,15 @@
 // my-app/src/App.tsx
 
 import React from 'react';
-import Header from './components/layout/Header';           
-import BottomNav from './components/layout/BottomNav';     
+import Header from './components/layout/Header';
+import BottomNav from './components/layout/BottomNav';
 import RoutesTab from './components/tabs/RoutesTab';
 import { AuthProvider } from './context/AuthContext';
 import SavedTab from './components/tabs/SavedTab';
 import ActivityTab from './components/tabs/ActivityTab';
 import ProfileTab from './components/tabs/ProfileTab';
 import { useKommyut } from './hooks/useKommyut';
+import { NotificationPrompt } from './components/notifications/NotificationPrompt';
 
 
 const KommyutApp: React.FC = () => {
@@ -93,6 +94,7 @@ return (
     )}
 
     <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+        <NotificationPrompt />
       </div>
     </AuthProvider>
 );

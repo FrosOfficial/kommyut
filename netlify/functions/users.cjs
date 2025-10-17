@@ -31,7 +31,7 @@ exports.handler = async (event, context) => {
     // POST /users - Create or update user
     if (event.httpMethod === 'POST' && pathSegments.length === 0) {
       const userData = JSON.parse(event.body);
-      const { uid, email, displayName, photoURL } = userData;
+      const { uid, email, displayName, photoURL, role } = userData;
 
       if (!uid) {
         return {
@@ -48,24 +48,33 @@ exports.handler = async (event, context) => {
           email VARCHAR(255),
           display_name VARCHAR(255),
           photo_url TEXT,
+          role VARCHAR(50) DEFAULT 'user',
           points INTEGER DEFAULT 0,
+          recent_searches TEXT,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       `);
 
-      // Upsert user
+      // Add role column if it doesn't exist (for existing tables)
+      await pool.query(`
+        ALTER TABLE users
+        ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user'
+      `).catch(() => {}); // Ignore error if column already exists
+
+      // Upsert user (don't overwrite role if not provided)
       const result = await pool.query(`
-        INSERT INTO users (uid, email, display_name, photo_url, points, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, 0, NOW(), NOW())
+        INSERT INTO users (uid, email, display_name, photo_url, role, points, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, COALESCE($5, 'user'), 0, NOW(), NOW())
         ON CONFLICT (uid)
         DO UPDATE SET
           email = EXCLUDED.email,
           display_name = EXCLUDED.display_name,
           photo_url = EXCLUDED.photo_url,
+          role = COALESCE(EXCLUDED.role, users.role),
           updated_at = NOW()
         RETURNING *
-      `, [uid, email, displayName, photoURL]);
+      `, [uid, email, displayName, photoURL, role || null]);
 
       return {
         statusCode: 200,
