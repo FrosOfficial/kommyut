@@ -9,7 +9,6 @@ import SavedTab from './components/tabs/SavedTab';
 import ActivityTab from './components/tabs/ActivityTab';
 import ProfileTab from './components/tabs/ProfileTab';
 import { useKommyut } from './hooks/useKommyut';
-import { NotificationPrompt } from './components/notifications/NotificationPrompt';
 
 
 const KommyutApp: React.FC = () => {
@@ -94,7 +93,6 @@ return (
     )}
 
     <BottomNav activeTab={activeTab} onTabChange={handleTabChange} />
-        <NotificationPrompt />
       </div>
     </AuthProvider>
 );

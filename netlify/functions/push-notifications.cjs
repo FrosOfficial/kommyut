@@ -108,6 +108,40 @@ exports.handler = async (event, context) => {
     }
   }
 
+  // Handle getting all notifications (for in-app display)
+  if (path === '/all' && event.httpMethod === 'GET') {
+    try {
+      const client = await pool.connect();
+      try {
+        const result = await client.query(
+          `SELECT id, title, message, created_at
+           FROM global_notifications
+           WHERE created_at > NOW() - INTERVAL '30 days'
+           ORDER BY created_at DESC
+           LIMIT 50`
+        );
+
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            success: true,
+            notifications: result.rows
+          }),
+        };
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error('Error fetching notifications:', error);
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ error: 'Failed to fetch notifications' }),
+      };
+    }
+  }
+
   // Handle sending notifications
   if (event.httpMethod === 'POST' && !path) {
     try {
@@ -123,6 +157,13 @@ exports.handler = async (event, context) => {
 
       const client = await pool.connect();
       try {
+        // Store notification for in-app display (GLOBAL - all users see this)
+        await client.query(
+          `INSERT INTO global_notifications (title, message, sent_by_uid)
+           VALUES ($1, $2, $3)`,
+          [title, message, userUid || null]
+        );
+
         // Get all active subscriptions
         const result = await client.query(
           'SELECT id, endpoint, p256dh_key, auth_key FROM push_subscriptions ORDER BY last_active DESC'
@@ -130,14 +171,15 @@ exports.handler = async (event, context) => {
 
         const subscriptions = result.rows;
 
+        // Always return success since notification is saved for in-app display
         if (subscriptions.length === 0) {
           return {
             statusCode: 200,
             headers,
             body: JSON.stringify({
               success: true,
-              message: 'No subscribers to send notifications to',
-              response: { successCount: 0, failureCount: 0 },
+              message: 'Notification saved! All users will see it in-app.',
+              response: { successCount: 0, failureCount: 0, inAppNotificationSaved: true },
             }),
           };
         }
