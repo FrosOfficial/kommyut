@@ -259,6 +259,10 @@ export interface UserData {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  birthday?: string;
+  userType?: string;
+  idVerified?: boolean;
+  idDocumentUrl?: string | null;
 }
 
 export const createOrUpdateUser = async (userData: UserData) => {

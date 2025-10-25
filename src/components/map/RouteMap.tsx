@@ -226,7 +226,7 @@ const RouteMap: React.FC<RouteMapProps> = ({ routeId, originStop, destinationSto
       </MapContainer>
 
       {/* Route info overlay */}
-      <div className="absolute top-3 left-3 bg-white dark:bg-gray-800 bg-opacity-95 p-3 rounded-lg shadow-md z-[1000] max-w-xs pointer-events-none">
+      <div className="absolute top-3 left-3 bg-white dark:bg-gray-800 bg-opacity-95 p-3 rounded-lg shadow-md z-[400] max-w-xs pointer-events-none">
         <div className="space-y-2">
           <div className="flex items-center space-x-2">
             <div className="w-3 h-3 bg-red-500 rounded-full"></div>

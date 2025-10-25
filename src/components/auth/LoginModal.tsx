@@ -1,10 +1,11 @@
 // src/components/auth/LoginModal.tsx
 
 import React, { useState } from 'react';
-import { X, Mail, Lock, User, Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { X, Mail, Lock, User, Eye, EyeOff, AlertCircle, Calendar, Upload, Shield } from 'lucide-react';
 import { signInWithPopup, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { auth, googleProvider } from '../../config/firebase';
 import { createOrUpdateUser, getUserByUid } from '../../services/api';
+import type { UserType } from '../../types';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -23,8 +24,11 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, theme }) => {
     name: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
+    birthday: '',
+    userType: 'regular' as UserType
   });
+  const [idDocument, setIdDocument] = useState<File | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showError, setShowError] = useState(false);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -57,6 +61,12 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, theme }) => {
         if (!formData.name) {
           throw new Error('Please enter your full name');
         }
+        if (!formData.birthday) {
+          throw new Error('Please enter your birthday');
+        }
+        if (formData.userType !== 'regular' && !idDocument) {
+          throw new Error('Please upload your ID for verification (Student ID, PWD ID, or Senior Citizen ID)');
+        }
         if (formData.password !== formData.confirmPassword) {
           throw new Error('Passwords do not match');
         }
@@ -67,31 +77,49 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, theme }) => {
         // Create account
         console.log('📧 Creating account with email:', formData.email);
         const userCredential = await createUserWithEmailAndPassword(
-          auth, 
-          formData.email, 
+          auth,
+          formData.email,
           formData.password
         );
         console.log('✅ Account created successfully!', userCredential.user);
-        
-        // Update user profile with display name
+
+        // TODO: Upload ID document to storage if provided
+        let idDocumentUrl = null;
+        if (idDocument) {
+          // For now, we'll skip the upload and just note that it exists
+          // In production, you'd upload to Firebase Storage or another service
+          console.log('📎 ID document selected:', idDocument.name);
+          idDocumentUrl = `pending-upload-${idDocument.name}`;
+        }
+
+        // Update user profile with all new fields
         if (userCredential.user) {
           await createOrUpdateUser({
             uid: userCredential.user.uid,
             email: userCredential.user.email,
             displayName: formData.name,
             photoURL: userCredential.user.photoURL,
+            birthday: formData.birthday,
+            userType: formData.userType,
+            idVerified: false, // Will be verified manually by admin
+            idDocumentUrl: idDocumentUrl,
           });
         }
 
-        setSuccessMessage('Account successfully created!');
+        const fareMessage = formData.userType === 'regular'
+          ? 'Regular fare: ₱13'
+          : `Discounted fare: ₱11 (${formData.userType.toUpperCase()})`;
+
+        setSuccessMessage(`Account successfully created! ${fareMessage}`);
         setShowSuccess(true);
-        
-        // Auto-hide success message and switch to login after 2 seconds
+
+        // Auto-hide success message and switch to login after 3 seconds
         setTimeout(() => {
           setShowSuccess(false);
           setIsLogin(true);
-          setFormData({ name: '', email: '', password: '', confirmPassword: '' });
-        }, 2000);
+          setFormData({ name: '', email: '', password: '', confirmPassword: '', birthday: '', userType: 'regular' });
+          setIdDocument(null);
+        }, 3000);
 
       } else {
         // Sign in
@@ -127,7 +155,7 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, theme }) => {
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
@@ -238,83 +266,222 @@ const handleGoogleSignIn = async () => {
 
           {/* Form */}
           <div className={`space-y-4 ${emailPasswordDisabled ? 'opacity-50 pointer-events-none' : ''}`}>
-            {!isLogin && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name
-                </label>
-                <div className="relative">
-                  <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                  <input
-                    type="text"
-                    name="name"
-                    value={formData.name}
-                    onChange={handleChange}
-                    placeholder="John Doe"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
-                  />
+            {!isLogin ? (
+              <div className="grid grid-cols-2 gap-4">
+                {/* Left Column - Name, Email, Passwords */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Full Name
+                    </label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                      <input
+                        type="text"
+                        name="name"
+                        value={formData.name}
+                        onChange={handleChange}
+                        placeholder="John Doe"
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Email Address
+                    </label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                      <input
+                        type="email"
+                        name="email"
+                        value={formData.email}
+                        onChange={handleChange}
+                        placeholder="you@example.com"
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:border-transparent shadow-sm hover:border-gray-400 focus:ring-blue-500/20 transition-all duration-200"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        name="password"
+                        value={formData.password}
+                        onChange={handleChange}
+                        placeholder="••••••••"
+                        className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                      >
+                        {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Confirm Password
+                    </label>
+                    <div className="relative">
+                      <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        name="confirmPassword"
+                        value={formData.confirmPassword}
+                        onChange={handleChange}
+                        placeholder="••••••••"
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column - Birthday, Account Type, ID Verification */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Birthday
+                    </label>
+                    <div className="relative">
+                      <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                      <input
+                        type="date"
+                        name="birthday"
+                        value={formData.birthday}
+                        onChange={handleChange}
+                        max={new Date().toISOString().split('T')[0]}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Account Type
+                    </label>
+                    <div className="relative">
+                      <Shield className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400 pointer-events-none" />
+                      <select
+                        name="userType"
+                        value={formData.userType}
+                        onChange={handleChange}
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all appearance-none bg-white"
+                      >
+                        <option value="regular">Regular (₱13 fare)</option>
+                        <option value="student">Student (₱11 fare)</option>
+                        <option value="pwd">PWD (₱11 fare)</option>
+                        <option value="senior">Senior Citizen (₱11 fare)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      ID Verification {formData.userType !== 'regular' && <span className="text-red-500">*</span>}
+                    </label>
+                    <div className="relative">
+                      <div className="flex items-center justify-center w-full">
+                        <label className={`flex flex-col items-center justify-center w-full border-2 border-dashed rounded-xl cursor-pointer transition-all ${
+                          formData.userType !== 'regular'
+                            ? 'h-[182px] border-blue-300 bg-blue-50 hover:bg-blue-100'
+                            : 'h-[182px] border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed'
+                        }`}>
+                          <div className="flex flex-col items-center justify-center px-4 py-4">
+                            <Upload className={`w-8 h-8 mb-2 ${formData.userType !== 'regular' ? 'text-blue-500' : 'text-gray-400'}`} />
+                            <p className="mb-1 text-sm text-center text-gray-600">
+                              {formData.userType !== 'regular' ? (
+                                <>
+                                  <span className="font-semibold">Click to upload</span>
+                                  <br />
+                                  <span className="text-xs">
+                                    {formData.userType === 'student' ? 'Student ID' : formData.userType === 'pwd' ? 'PWD ID' : 'Senior Citizen ID'}
+                                  </span>
+                                </>
+                              ) : (
+                                <span className="text-xs">Select a discount type to upload ID</span>
+                              )}
+                            </p>
+                            {idDocument && (
+                              <p className="text-xs text-green-600 font-medium mt-2 text-center">
+                                ✓ {idDocument.name}
+                              </p>
+                            )}
+                          </div>
+                          <input
+                            type="file"
+                            className="hidden"
+                            accept="image/*,.pdf"
+                            disabled={formData.userType === 'regular'}
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                setIdDocument(e.target.files[0]);
+                              }
+                            }}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                    {formData.userType !== 'regular' && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Required for discount. Will be verified by admin.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  placeholder="you@example.com"
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:border-transparent shadow-sm hover:border-gray-400 focus:ring-blue-500/20 transition-all duration-200"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  name="password"
-                  value={formData.password}
-                  onChange={handleChange}
-                  placeholder="••••••••"
-                  className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
-              </div>
-            </div>
-
-            {!isLogin && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Confirm Password
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    name="confirmPassword"
-                    value={formData.confirmPassword}
-                    onChange={handleChange}
-                    placeholder="••••••••"
-                    className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
-                  />
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type="email"
+                      name="email"
+                      value={formData.email}
+                      onChange={handleChange}
+                      placeholder="you@example.com"
+                      className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:border-transparent shadow-sm hover:border-gray-400 focus:ring-blue-500/20 transition-all duration-200"
+                    />
+                  </div>
                 </div>
-              </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-5 w-5 text-gray-400" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      name="password"
+                      value={formData.password}
+                      onChange={handleChange}
+                      placeholder="••••••••"
+                      className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 transition-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                </div>
+              </>
             )}
 
             {isLogin && (

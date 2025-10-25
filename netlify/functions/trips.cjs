@@ -140,6 +140,123 @@ exports.handler = async (event, context) => {
       return response(200, result.rows[0]);
     }
 
+    // GET /trips/route-demand - Get frequently used routes (highest demand)
+    if (event.httpMethod === 'GET' && pathSegments[0] === 'route-demand' && pathSegments.length === 1) {
+      const result = await pool.query(`
+        SELECT
+          from_location,
+          to_location,
+          route_name,
+          transit_type,
+          COUNT(*) as trip_count,
+          COUNT(DISTINCT user_uid) as unique_users,
+          ROUND(AVG(distance_km)::numeric, 2) as avg_distance,
+          ROUND(AVG(fare_paid)::numeric, 2) as avg_fare,
+          ROUND(SUM(fare_paid)::numeric, 2) as total_revenue
+        FROM user_trips
+        WHERE status = 'completed'
+          AND transit_type IS NOT NULL
+          AND transit_type != 'WALK'
+          AND transit_type != 'walking'
+          AND fare_paid > 0
+          AND distance_km > 0.5
+        GROUP BY from_location, to_location, route_name, transit_type
+        ORDER BY trip_count DESC
+        LIMIT 50
+      `);
+
+      return response(200, result.rows);
+    }
+
+    // GET /trips/all-stats - Get overall trip statistics (completed vs active)
+    if (event.httpMethod === 'GET' && pathSegments[0] === 'all-stats' && pathSegments.length === 1) {
+      const result = await pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status = 'completed') as completed_trips,
+          COUNT(*) FILTER (WHERE status = 'active') as active_trips,
+          COUNT(*) as total_trips,
+          COUNT(DISTINCT user_uid) FILTER (WHERE status = 'completed') as users_completed,
+          COUNT(DISTINCT user_uid) FILTER (WHERE status = 'active') as users_active,
+          COUNT(DISTINCT user_uid) as total_users,
+          ROUND(COALESCE(SUM(distance_km) FILTER (WHERE status = 'completed'), 0)::numeric, 2) as total_distance_completed,
+          ROUND(COALESCE(SUM(fare_paid) FILTER (WHERE status = 'completed'), 0)::numeric, 2) as total_revenue
+        FROM user_trips
+      `);
+
+      return response(200, result.rows[0]);
+    }
+
+    // GET /trips/fare-analytics - Get total fare accumulated with time-based breakdown
+    if (event.httpMethod === 'GET' && pathSegments[0] === 'fare-analytics' && pathSegments.length === 1) {
+      const { period } = event.queryStringParameters || {};
+
+      let timeFilter = '';
+      let groupBy = '';
+      let dateFormat = '';
+
+      switch (period) {
+        case 'day':
+          timeFilter = `AND completed_at >= CURRENT_DATE - INTERVAL '30 days'`;
+          groupBy = `DATE(completed_at AT TIME ZONE 'Asia/Manila')`;
+          dateFormat = `TO_CHAR(DATE(completed_at AT TIME ZONE 'Asia/Manila'), 'YYYY-MM-DD')`;
+          break;
+        case 'week':
+          timeFilter = `AND completed_at >= CURRENT_DATE - INTERVAL '12 weeks'`;
+          groupBy = `DATE_TRUNC('week', completed_at AT TIME ZONE 'Asia/Manila')`;
+          dateFormat = `TO_CHAR(DATE_TRUNC('week', completed_at AT TIME ZONE 'Asia/Manila'), 'YYYY-MM-DD')`;
+          break;
+        case 'month':
+          timeFilter = `AND completed_at >= CURRENT_DATE - INTERVAL '12 months'`;
+          groupBy = `DATE_TRUNC('month', completed_at AT TIME ZONE 'Asia/Manila')`;
+          dateFormat = `TO_CHAR(DATE_TRUNC('month', completed_at AT TIME ZONE 'Asia/Manila'), 'YYYY-MM')`;
+          break;
+        default:
+          // Overall stats
+          const overallResult = await pool.query(`
+            SELECT
+              ROUND(SUM(fare_paid)::numeric, 2) as total_revenue,
+              COUNT(*) as total_trips,
+              COUNT(DISTINCT user_uid) as unique_users,
+              ROUND(AVG(fare_paid)::numeric, 2) as avg_fare_per_trip,
+              ROUND(SUM(distance_km)::numeric, 2) as total_distance
+            FROM user_trips
+            WHERE status = 'completed'
+          `);
+          return response(200, { summary: overallResult.rows[0], breakdown: [] });
+      }
+
+      const [summaryResult, breakdownResult] = await Promise.all([
+        pool.query(`
+          SELECT
+            ROUND(SUM(fare_paid)::numeric, 2) as total_revenue,
+            COUNT(*) as total_trips,
+            COUNT(DISTINCT user_uid) as unique_users,
+            ROUND(AVG(fare_paid)::numeric, 2) as avg_fare_per_trip,
+            ROUND(SUM(distance_km)::numeric, 2) as total_distance
+          FROM user_trips
+          WHERE status = 'completed'
+          ${timeFilter}
+        `),
+        pool.query(`
+          SELECT
+            ${dateFormat} as period,
+            ROUND(SUM(fare_paid)::numeric, 2) as revenue,
+            COUNT(*) as trips,
+            COUNT(DISTINCT user_uid) as users
+          FROM user_trips
+          WHERE status = 'completed'
+          ${timeFilter}
+          GROUP BY ${groupBy}
+          ORDER BY ${groupBy} ASC
+        `)
+      ]);
+
+      return response(200, {
+        summary: summaryResult.rows[0],
+        breakdown: breakdownResult.rows
+      });
+    }
+
     return response(404, { error: 'Route not found' });
 
   } catch (error) {

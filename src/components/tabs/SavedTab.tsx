@@ -23,7 +23,11 @@ interface SavedRoute {
   created_at: string;
 }
 
-const SavedTab: React.FC = () => {
+interface SavedTabProps {
+  onRouteSelect: (from: string, to: string) => void;
+}
+
+const SavedTab: React.FC<SavedTabProps> = ({ onRouteSelect }) => {
   const { currentUser } = useAuth();
   const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
   const [loading, setLoading] = useState(true);
@@ -116,11 +120,8 @@ const SavedTab: React.FC = () => {
   };
 
   const handleStartJourney = (route: SavedRoute) => {
-    // Switch to Routes tab first
-    const routesTabButton = document.querySelector('[data-tab="routes"]') as HTMLButtonElement;
-    if (routesTabButton) {
-      routesTabButton.click();
-    }
+    // Use the onRouteSelect prop to switch tabs and set route data
+    onRouteSelect(route.from_stop_name, route.to_stop_name);
 
     // Dispatch event with route data after a short delay to ensure tab switch completes
     setTimeout(() => {

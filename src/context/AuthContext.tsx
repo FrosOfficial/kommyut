@@ -3,10 +3,16 @@ import type { User } from 'firebase/auth';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { getUserByUid } from '../services/api';
+import type { UserType } from '../types';
 
 interface ExtendedUser extends User {
   customDisplayName?: string;
   points?: number;
+  birthday?: string;
+  userType?: UserType;
+  idVerified?: boolean;
+  fareId?: string; // 'F001' for regular, 'F002' for discounted
+  farePrice?: number; // 13 for regular, 11 for discounted
 }
 
 interface AuthContextType {
@@ -30,19 +36,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const dbUser = await getUserByUid(user.uid);
           console.log('🔍 Database user data:', dbUser);
           
+          // Determine fare based on user type AND verification status
+          const userType = (dbUser?.user_type || 'regular') as UserType;
+          const isVerified = dbUser?.id_verified || false;
+          // Only apply discount if user type is not regular AND ID is verified
+          const fareId = (userType === 'regular' || !isVerified) ? 'F001' : 'F002';
+          const farePrice = (userType === 'regular' || !isVerified) ? 13 : 11;
+
           // Merge Firebase user with database user data
           const extendedUser = {
             ...user,
             customDisplayName: dbUser?.display_name || dbUser?.displayName || user.displayName,
-            points: dbUser?.points || 0
+            points: dbUser?.points || 0,
+            birthday: dbUser?.birthday,
+            userType: userType,
+            idVerified: dbUser?.id_verified || false,
+            fareId: fareId,
+            farePrice: farePrice
           } as ExtendedUser;
-          
+
           console.log('🔍 User data merge:', {
             firebaseDisplayName: user.displayName,
             databaseDisplayName: dbUser?.display_name,
-            finalDisplayName: extendedUser.customDisplayName
+            finalDisplayName: extendedUser.customDisplayName,
+            userType: extendedUser.userType,
+            fareId: extendedUser.fareId,
+            farePrice: extendedUser.farePrice
           });
-          
+
           setCurrentUser(extendedUser);
         } catch (error) {
           console.log('No database user found, creating user in database...');
@@ -59,14 +80,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             
             console.log('✅ User created in database:', newDbUser);
-            
+
+            // Determine fare based on user type AND verification status
+            const userType = (newDbUser?.user_type || 'regular') as UserType;
+            const isVerified = newDbUser?.id_verified || false;
+            // Only apply discount if user type is not regular AND ID is verified
+            const fareId = (userType === 'regular' || !isVerified) ? 'F001' : 'F002';
+            const farePrice = (userType === 'regular' || !isVerified) ? 13 : 11;
+
             // Merge Firebase user with database user data
             const extendedUser = {
               ...user,
               customDisplayName: newDbUser?.display_name || newDbUser?.displayName || user.displayName,
-              points: newDbUser?.points || 0
+              points: newDbUser?.points || 0,
+              birthday: newDbUser?.birthday,
+              userType: userType,
+              idVerified: newDbUser?.id_verified || false,
+              fareId: fareId,
+              farePrice: farePrice
             } as ExtendedUser;
-            
+
             setCurrentUser(extendedUser);
           } catch (createError) {
             console.log('Failed to create user in database, using Firebase user only');

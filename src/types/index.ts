@@ -442,3 +442,32 @@ export type BoundingBox = {
   east: number;
   west: number;
 };
+
+// ============================================================================
+// USER ACCOUNT TYPES
+// ============================================================================
+
+export type UserType = 'regular' | 'student' | 'pwd' | 'senior';
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  birthday?: string; // Format: YYYY-MM-DD
+  userType: UserType;
+  idVerified: boolean;
+  idDocumentUrl?: string;
+  verificationNote?: string; // Reason for approval/rejection from manager
+  points: number;
+  role: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface FareInfo {
+  fareId: string; // 'F001' for regular, 'F002' for discounted
+  price: number;
+  currencyType: string;
+  discountEligible: boolean;
+}

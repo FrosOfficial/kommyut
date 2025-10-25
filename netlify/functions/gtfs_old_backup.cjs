@@ -28,7 +28,7 @@ exports.handler = async (event) => {
   }
 
   const path = event.path.replace('/.netlify/functions/gtfs', '');
-
+  
   try {
     // GET /stops - Get all stops
     if (path === '/stops' && event.httpMethod === 'GET') {
@@ -39,7 +39,7 @@ exports.handler = async (event) => {
     // GET /routes - Get all routes
     if (path === '/routes' && event.httpMethod === 'GET') {
       const result = await query(`
-        SELECT DISTINCT
+        SELECT DISTINCT 
           r.route_id,
           r.route_short_name,
           r.route_long_name,
@@ -58,7 +58,7 @@ exports.handler = async (event) => {
     if (routeStopsMatch && event.httpMethod === 'GET') {
       const routeId = routeStopsMatch[1];
       const result = await query(`
-        SELECT DISTINCT
+        SELECT DISTINCT 
           s.stop_id,
           s.stop_name,
           s.stop_lat,
@@ -78,7 +78,7 @@ exports.handler = async (event) => {
     if (routeScheduleMatch && event.httpMethod === 'GET') {
       const routeId = routeScheduleMatch[1];
       const result = await query(`
-        SELECT
+        SELECT 
           st.stop_id,
           st.arrival_time,
           st.departure_time,
@@ -98,85 +98,28 @@ exports.handler = async (event) => {
     const findRoutesMatch = path.match(/^\/find-routes\/([^\/]+)\/([^\/]+)$/);
     if (findRoutesMatch && event.httpMethod === 'GET') {
       const [, fromStopId, toStopId] = findRoutesMatch;
-
-      // Get the stop coordinates for distance calculation
-      const stopsResult = await query(`
-        SELECT stop_id, stop_lat, stop_lon, stop_name
-        FROM stops
-        WHERE stop_id IN ($1, $2)
-      `, [fromStopId, toStopId]);
-
-      const fromStop = stopsResult.rows.find(s => s.stop_id === fromStopId);
-      const toStop = stopsResult.rows.find(s => s.stop_id === toStopId);
-
-      if (!fromStop || !toStop) {
-        return response(404, { error: 'Stops not found' });
-      }
-
-      // Calculate distance using Haversine formula
-      const toRad = (deg) => deg * (Math.PI / 180);
-      const R = 6371; // Earth's radius in km
-      const dLat = toRad(toStop.stop_lat - fromStop.stop_lat);
-      const dLon = toRad(toStop.stop_lon - fromStop.stop_lon);
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(toRad(fromStop.stop_lat)) * Math.cos(toRad(toStop.stop_lat)) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance_km = R * c;
-
-      // Find routes
-      const routesResult = await query(`
+      const result = await query(`
         SELECT DISTINCT
           r.route_id,
           r.route_short_name,
           r.route_long_name,
           r.route_type,
-          COUNT(DISTINCT t.trip_id) as trip_count
+          r.agency_id,
+          a.agency_name
         FROM routes r
-        JOIN trips t ON r.route_id = t.route_id
+        LEFT JOIN agency a ON r.agency_id = a.agency_id
         WHERE EXISTS (
           SELECT 1 FROM stop_times st1
-          WHERE st1.trip_id = t.trip_id AND st1.stop_id = $1
+          JOIN trips t1 ON st1.trip_id = t1.trip_id
+          WHERE t1.route_id = r.route_id AND st1.stop_id = $1
         )
         AND EXISTS (
           SELECT 1 FROM stop_times st2
-          WHERE st2.trip_id = t.trip_id AND st2.stop_id = $2
+          JOIN trips t2 ON st2.trip_id = t2.trip_id
+          WHERE t2.route_id = r.route_id AND st2.stop_id = $2
         )
-        GROUP BY r.route_id, r.route_short_name, r.route_long_name, r.route_type
       `, [fromStopId, toStopId]);
-
-      // For each route, get the stops between from and to
-      const enrichedRoutes = await Promise.all(routesResult.rows.map(async (route) => {
-        // Get stops for this route in sequence
-        const routeStopsResult = await query(`
-          SELECT DISTINCT
-            s.stop_id,
-            s.stop_name,
-            s.stop_lat,
-            s.stop_lon
-          FROM stops s
-          JOIN stop_times st ON s.stop_id = st.stop_id
-          JOIN trips t ON st.trip_id = t.trip_id
-          WHERE t.route_id = $1
-          AND (st.stop_id = $2 OR st.stop_id = $3)
-          ORDER BY s.stop_name
-        `, [route.route_id, fromStopId, toStopId]);
-
-        // Simple fare estimation based on distance
-        // Base fare: ₱13, add ₱1 per km
-        const estimated_fare = 13 + Math.floor(distance_km);
-
-        return {
-          route_id: route.route_id,
-          route_name: route.route_short_name || route.route_long_name || `Route ${route.route_id}`,
-          trip_count: parseInt(route.trip_count) || 0,
-          stops: routeStopsResult.rows,
-          distance_km: parseFloat(distance_km.toFixed(2)),
-          estimated_fare: parseFloat(estimated_fare.toFixed(2))
-        };
-      }));
-
-      return response(200, enrichedRoutes);
+      return response(200, result.rows);
     }
 
     // GET /routes/:routeId/shape - Get shape data for a specific route
@@ -380,3 +323,4 @@ exports.handler = async (event) => {
     return response(500, { error: 'Internal server error', details: error.message });
   }
 };
+

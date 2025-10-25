@@ -8,6 +8,7 @@ import * as api from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import RouteMap from '../map/RouteMap';
 import { startTrip } from '../../services/api';
+import { getFarePrice, getUserTypeLabel } from '../../utils/fareCalculation';
 
 // Theme colors based on logo
 const theme = {
@@ -781,6 +782,35 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
 
       console.log('Finding routes between stops...');
 
+      // Calculate distance between from and to stops
+      const directDistance = calculateDistance(
+        parseFloat(fromStop.stop_lat),
+        parseFloat(fromStop.stop_lon),
+        parseFloat(toStop.stop_lat),
+        parseFloat(toStop.stop_lon)
+      );
+
+      console.log('Direct distance:', directDistance, 'km');
+
+      // Check if walking distance (< 0.5km or 500 meters)
+      if (directDistance < 0.5) {
+        console.log('Walking distance detected! Showing walking route...');
+        const walkingRoute: RouteResult = {
+          summary: `${fromStop.stop_name} → ${toStop.stop_name}`,
+          routeName: 'Walking Route',
+          mode: 'Walking',
+          fare: { regular: 'Free', discounted: 'Free' },
+          distance: `${directDistance.toFixed(2)} km`,
+          origin: fromStop,
+          destination: toStop,
+          routeType: -1, // Special type for walking
+          routeId: 'walking'
+        };
+        setRouteResults([walkingRoute]);
+        setIsSearching(false);
+        return;
+      }
+
       // Find direct routes
       const directRoutes = await findRoute(fromStop, toStop);
       console.log('Direct routes found:', directRoutes.length);
@@ -799,11 +829,11 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
             parseFloat(next.stop_lon)
           );
         }
-        
+
         // Get route type and determine mode
         const routeType = parseInt(routeInfo.route.route_type);
         const mode = getRouteTypeDescription(routeType, routeInfo.route.route_id);
-        
+
         // Calculate fare based on route type using API
         console.log(`Estimating fare for route ${routeInfo.route.route_id}...`);
         const fareEstimates = await estimateFare(
@@ -1300,7 +1330,16 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
                             </span>
                             <div className="flex items-center space-x-1">
                               <Wallet className="h-3 w-3 text-green-600" />
-                              <span className="font-bold text-sm text-green-600">{route.fare.regular}</span>
+                              <span className="font-bold text-sm text-green-600">
+                                {currentUser?.userType && currentUser.userType !== 'regular'
+                                  ? route.fare.discounted || route.fare.regular
+                                  : route.fare.regular}
+                              </span>
+                              {currentUser?.userType && currentUser.userType !== 'regular' && (
+                                <span className="text-xs text-green-600 font-medium">
+                                  ({getUserTypeLabel(currentUser.userType)})
+                                </span>
+                              )}
                             </div>
                             <span className="text-xs text-gray-500 dark:text-gray-400 transition-colors">{route.distance}</span>
                           </div>
@@ -1599,7 +1638,23 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
           Available Transportation Modes
         </h3>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+          {/* Walking */}
+          <div className="p-4 rounded-xl border-2 border-green-200 dark:border-green-800 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900 dark:to-green-800 transition-all hover:shadow-md cursor-pointer transform hover:scale-105 animate-fadeIn" style={{ animationDelay: '0.2s' }}>
+            <div className="text-center">
+              <div className="w-14 h-14 bg-green-500 rounded-xl flex items-center justify-center mx-auto mb-2 text-2xl shadow-md">
+                🚶
+              </div>
+              <p className="font-bold text-sm text-gray-900 dark:text-white transition-colors">Walking</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400 transition-colors mt-1">
+                &lt; 0.5 km
+              </p>
+              <div className="mt-2 px-2 py-0.5 bg-green-500 text-white text-xs font-semibold rounded-full inline-block animate-pulse">
+                Active
+              </div>
+            </div>
+          </div>
+
           {/* PUJ */}
           <div className="p-4 rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900 dark:to-blue-800 transition-all hover:shadow-md cursor-pointer transform hover:scale-105 animate-fadeIn" style={{ animationDelay: '0.3s' }}>
             <div className="text-center">
@@ -1612,6 +1667,22 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
               </p>
               <div className="mt-2 px-2 py-0.5 bg-green-500 text-white text-xs font-semibold rounded-full inline-block animate-pulse">
                 Active
+              </div>
+            </div>
+          </div>
+
+          {/* Trike */}
+          <div className="p-4 rounded-xl border-2 border-gray-200 dark:border-gray-700 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-800 dark:to-gray-700 transition-all opacity-60 cursor-not-allowed animate-fadeIn" style={{ animationDelay: '0.35s' }}>
+            <div className="text-center">
+              <div className="w-14 h-14 bg-gray-400 rounded-xl flex items-center justify-center mx-auto mb-2 text-2xl shadow-md">
+                🛺
+              </div>
+              <p className="font-bold text-sm text-gray-900 dark:text-white transition-colors">Trike</p>
+              <p className="text-xs text-gray-600 dark:text-gray-400 transition-colors mt-1">
+                Tricycle
+              </p>
+              <div className="mt-2 px-2 py-0.5 bg-gray-400 text-white text-xs font-semibold rounded-full inline-block">
+                Coming Soon
               </div>
             </div>
           </div>
@@ -1734,8 +1805,8 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
 
       {/* Journey Start Confirmation Modal */}
       {showJourneyModal && selectedRoute && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full transition-colors">
+        <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-[9999] p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto transition-colors relative z-[10000]">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white transition-colors">Start Your Journey?</h3>
@@ -1746,8 +1817,18 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
                   <X className="h-6 w-6" />
                 </button>
               </div>
-              
+
               <div className="space-y-4">
+                {/* Route Map */}
+                <div className="rounded-lg overflow-hidden">
+                  <RouteMap
+                    routeId={selectedRoute.routeId}
+                    originStop={selectedRoute.origin}
+                    destinationStop={selectedRoute.destination}
+                    routeName={selectedRoute.routeName}
+                  />
+                </div>
+
                 <div className="bg-blue-50 dark:bg-blue-900 dark:bg-opacity-30 rounded-lg p-4 transition-colors">
                   <div className="flex items-center space-x-2 mb-2">
                     <Navigation className="h-5 w-5 text-blue-600 dark:text-blue-400 transition-colors" />
@@ -1763,10 +1844,17 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
                     <strong>Mode:</strong> {selectedRoute.mode}
                   </p>
                   <p className="text-sm text-blue-800 dark:text-blue-300 transition-colors">
-                    <strong>Fare:</strong> {selectedRoute.fare.regular}
+                    <strong>Fare:</strong> {currentUser?.userType && currentUser.userType !== 'regular'
+                      ? selectedRoute.fare.discounted || selectedRoute.fare.regular
+                      : selectedRoute.fare.regular}
+                    {currentUser?.userType && currentUser.userType !== 'regular' && (
+                      <span className="ml-2 text-xs font-semibold text-green-600">
+                        ({getUserTypeLabel(currentUser.userType)} Discount)
+                      </span>
+                    )}
                   </p>
                 </div>
-                
+
                 <div className="bg-green-50 dark:bg-green-900 dark:bg-opacity-30 rounded-lg p-4 transition-colors">
                   <div className="flex items-center space-x-2 mb-2">
                     <Award className="h-5 w-5 text-green-600 dark:text-green-400 transition-colors" />
@@ -1778,7 +1866,7 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
                     <li>• Contribute to environmental sustainability</li>
                   </ul>
                 </div>
-                
+
                 <div className="flex space-x-3">
                   <button
                     onClick={handleCancelJourney}

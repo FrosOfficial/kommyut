@@ -29,14 +29,51 @@ const Header: React.FC<HeaderProps> = ({
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loadingNotifications, setLoadingNotifications] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
   const { currentUser } = useAuth();
+
+  // Check for new notifications periodically
+  useEffect(() => {
+    checkForNewNotifications();
+
+    // Check every 30 seconds
+    const interval = setInterval(checkForNewNotifications, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch notifications when dropdown opens
   useEffect(() => {
-    if (showNotifications && notifications.length === 0) {
+    if (showNotifications) {
       fetchNotifications();
+      markNotificationsAsRead();
     }
   }, [showNotifications]);
+
+  const checkForNewNotifications = async () => {
+    try {
+      const response = await fetch('/.netlify/functions/push-notifications/all');
+      if (response.ok) {
+        const data = await response.json();
+        const latestNotifications = data.notifications || [];
+
+        if (latestNotifications.length > 0) {
+          const lastViewedTime = localStorage.getItem('lastNotificationViewTime');
+          const latestNotifTime = new Date(latestNotifications[0].created_at).getTime();
+
+          if (!lastViewedTime || latestNotifTime > parseInt(lastViewedTime)) {
+            setHasUnread(true);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error checking notifications:', error);
+    }
+  };
+
+  const markNotificationsAsRead = () => {
+    localStorage.setItem('lastNotificationViewTime', Date.now().toString());
+    setHasUnread(false);
+  };
 
   const fetchNotifications = async () => {
     setLoadingNotifications(true);
@@ -90,6 +127,9 @@ const Header: React.FC<HeaderProps> = ({
               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg relative transition-colors"
             >
               <Bell className="h-5 w-5 dark:text-white" style={{ color: theme.primary }} />
+              {hasUnread && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white dark:ring-gray-800 animate-pulse"></span>
+              )}
             </button>
 
             {currentUser ? (

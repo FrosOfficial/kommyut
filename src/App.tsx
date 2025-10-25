@@ -18,7 +18,6 @@ const KommyutApp: React.FC = () => {
     isSearching,
     showNotifications,
     setShowNotifications,
-    userPoints,
     handleTabChange,
   } = useKommyut();
 
@@ -56,7 +55,7 @@ const KommyutApp: React.FC = () => {
         <ActivityTab />
       </div>
       <div style={{ display: activeTab === 'profile' ? 'block' : 'none' }}>
-        <ProfileTab userPoints={userPoints} />
+        <ProfileTab />
       </div>
     </>
   );
