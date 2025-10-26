@@ -666,12 +666,12 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
 
       // Convert to the expected format
       return matchingRoutes.map((route: any) => ({
-        stops: [fromStop, toStop], // Simplified - just show origin and destination
+        stops: route.stops || [fromStop, toStop], // Use stops from API if available (for multi-modal), otherwise just origin/destination
         route: {
           route_id: route.route_id,
           route_short_name: route.route_short_name,
           route_long_name: route.route_long_name,
-          route_type: route.route_type.toString(),
+          route_type: route.route_type?.toString() || '3', // Default to '3' (PUJ) if not provided
           agency_id: route.agency_id
         },
         trip: {
@@ -680,7 +680,10 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
           service_id: 'default',
           trip_headsign: route.route_long_name || route.route_short_name,
           direction_id: '0'
-        }
+        },
+        is_multimodal: route.is_multimodal || false,
+        transfer_point: route.transfer_point,
+        legs: route.legs
       }));
     } catch (error) {
       console.error('Error finding routes:', error);

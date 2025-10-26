@@ -124,8 +124,8 @@ exports.handler = async (event) => {
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distance_km = R * c;
 
-      // Find routes
-      const routesResult = await query(`
+      // First, try to find DIRECT routes (single trip connects both stops)
+      const directRoutesResult = await query(`
         SELECT DISTINCT
           r.route_id,
           r.route_short_name,
@@ -145,36 +145,134 @@ exports.handler = async (event) => {
         GROUP BY r.route_id, r.route_short_name, r.route_long_name, r.route_type
       `, [fromStopId, toStopId]);
 
-      // For each route, get the stops between from and to
-      const enrichedRoutes = await Promise.all(routesResult.rows.map(async (route) => {
-        // Get stops for this route in sequence
-        const routeStopsResult = await query(`
-          SELECT DISTINCT
-            s.stop_id,
-            s.stop_name,
-            s.stop_lat,
-            s.stop_lon
-          FROM stops s
-          JOIN stop_times st ON s.stop_id = st.stop_id
-          JOIN trips t ON st.trip_id = t.trip_id
-          WHERE t.route_id = $1
-          AND (st.stop_id = $2 OR st.stop_id = $3)
-          ORDER BY s.stop_name
-        `, [route.route_id, fromStopId, toStopId]);
+      let enrichedRoutes = [];
 
-        // Simple fare estimation based on distance
-        // Base fare: ₱13, add ₱1 per km
-        const estimated_fare = 13 + Math.floor(distance_km);
+      // If direct routes found, use them
+      if (directRoutesResult.rows.length > 0) {
+        enrichedRoutes = await Promise.all(directRoutesResult.rows.map(async (route) => {
+          const routeStopsResult = await query(`
+            SELECT DISTINCT
+              s.stop_id,
+              s.stop_name,
+              s.stop_lat,
+              s.stop_lon
+            FROM stops s
+            JOIN stop_times st ON s.stop_id = st.stop_id
+            JOIN trips t ON st.trip_id = t.trip_id
+            WHERE t.route_id = $1
+            AND (st.stop_id = $2 OR st.stop_id = $3)
+            ORDER BY s.stop_name
+          `, [route.route_id, fromStopId, toStopId]);
 
-        return {
-          route_id: route.route_id,
-          route_name: route.route_short_name || route.route_long_name || `Route ${route.route_id}`,
-          trip_count: parseInt(route.trip_count) || 0,
-          stops: routeStopsResult.rows,
-          distance_km: parseFloat(distance_km.toFixed(2)),
-          estimated_fare: parseFloat(estimated_fare.toFixed(2))
-        };
-      }));
+          const estimated_fare = 13 + Math.floor(distance_km);
+
+          return {
+            route_id: route.route_id,
+            route_name: route.route_short_name || route.route_long_name || `Route ${route.route_id}`,
+            trip_count: parseInt(route.trip_count) || 0,
+            stops: routeStopsResult.rows,
+            distance_km: parseFloat(distance_km.toFixed(2)),
+            estimated_fare: parseFloat(estimated_fare.toFixed(2)),
+            is_multimodal: false
+          };
+        }));
+      } else {
+        // No direct routes - try MULTI-MODAL routing (with transfers)
+        // Find all routes that serve the origin
+        const fromRoutesResult = await query(`
+          SELECT DISTINCT r.route_id
+          FROM routes r
+          JOIN trips t ON r.route_id = t.route_id
+          JOIN stop_times st ON t.trip_id = st.trip_id
+          WHERE st.stop_id = $1
+        `, [fromStopId]);
+
+        // Find all routes that serve the destination
+        const toRoutesResult = await query(`
+          SELECT DISTINCT r.route_id
+          FROM routes r
+          JOIN trips t ON r.route_id = t.route_id
+          JOIN stop_times st ON t.trip_id = st.trip_id
+          WHERE st.stop_id = $1
+        `, [toStopId]);
+
+        const fromRoutes = fromRoutesResult.rows.map(r => r.route_id);
+        const toRoutes = toRoutesResult.rows.map(r => r.route_id);
+
+        // For each combination, find common transfer points
+        for (const fromRouteId of fromRoutes) {
+          for (const toRouteId of toRoutes) {
+            if (fromRouteId === toRouteId) continue; // Skip if same route
+
+            // Find common stops between the two routes (potential transfer points)
+            const transferStopsResult = await query(`
+              SELECT DISTINCT s.stop_id, s.stop_name, s.stop_lat, s.stop_lon
+              FROM stops s
+              WHERE EXISTS (
+                SELECT 1 FROM stop_times st1
+                JOIN trips t1 ON st1.trip_id = t1.trip_id
+                WHERE t1.route_id = $1 AND st1.stop_id = s.stop_id
+              )
+              AND EXISTS (
+                SELECT 1 FROM stop_times st2
+                JOIN trips t2 ON st2.trip_id = t2.trip_id
+                WHERE t2.route_id = $2 AND st2.stop_id = s.stop_id
+              )
+              LIMIT 5
+            `, [fromRouteId, toRouteId]);
+
+            if (transferStopsResult.rows.length > 0) {
+              // Found a multi-modal route! Use the first transfer point
+              const transferStop = transferStopsResult.rows[0];
+
+              // Get route info for both legs
+              const fromRouteInfo = await query(`
+                SELECT route_id, route_short_name, route_long_name, route_type
+                FROM routes WHERE route_id = $1
+              `, [fromRouteId]);
+
+              const toRouteInfo = await query(`
+                SELECT route_id, route_short_name, route_long_name, route_type
+                FROM routes WHERE route_id = $1
+              `, [toRouteId]);
+
+              if (fromRouteInfo.rows.length > 0 && toRouteInfo.rows.length > 0) {
+                const leg1 = fromRouteInfo.rows[0];
+                const leg2 = toRouteInfo.rows[0];
+
+                // Combine the routes
+                enrichedRoutes.push({
+                  route_id: `${fromRouteId}_${toRouteId}`,
+                  route_short_name: `${leg1.route_short_name || leg1.route_long_name} → ${leg2.route_short_name || leg2.route_long_name}`,
+                  route_long_name: `${leg1.route_long_name || leg1.route_short_name} to ${leg2.route_long_name || leg2.route_short_name}`,
+                  route_name: `${leg1.route_short_name || leg1.route_long_name} → ${leg2.route_short_name || leg2.route_long_name}`,
+                  route_type: 3, // Default to PUJ type
+                  trip_count: 1,
+                  stops: [fromStop, transferStop, toStop],
+                  distance_km: parseFloat(distance_km.toFixed(2)),
+                  estimated_fare: parseFloat((26 + Math.floor(distance_km)).toFixed(2)), // Double base fare for transfers
+                  is_multimodal: true,
+                  transfer_point: transferStop.stop_name,
+                  legs: [
+                    {
+                      route_id: leg1.route_id,
+                      route_name: leg1.route_short_name || leg1.route_long_name,
+                      from: fromStop.stop_name,
+                      to: transferStop.stop_name
+                    },
+                    {
+                      route_id: leg2.route_id,
+                      route_name: leg2.route_short_name || leg2.route_long_name,
+                      from: transferStop.stop_name,
+                      to: toStop.stop_name
+                    }
+                  ]
+                });
+              }
+            }
+          }
+        }
+      }
 
       return response(200, enrichedRoutes);
     }
