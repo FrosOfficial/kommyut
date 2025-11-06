@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Search, Loader2, Clock, ArrowRight, Star, Wallet, TrendingUp,
@@ -36,6 +37,8 @@ interface GTFSRoute {
   route_short_name: string;
   route_long_name: string;
   route_type: string;
+  route_signboard?: string;
+  agency_id?: string;
 }
 
 interface GTFSTrip {
@@ -54,6 +57,14 @@ interface GTFSStopTime {
   stop_sequence: string;
 }
 
+interface RouteLeg {
+  route_id: string;
+  route_name: string;
+  route_signboard?: string;
+  from?: string;
+  to?: string;
+}
+
 interface RouteResult {
   summary: string;
   routeName: string;
@@ -67,6 +78,7 @@ interface RouteResult {
   destination: GTFSStop;
   routeType: number;
   routeId: string;
+  signboard?: string;
 }
 
 interface RecentSearch {
@@ -651,7 +663,10 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
   const findRoute = async (fromStop: GTFSStop, toStop: GTFSStop): Promise<{
     stops: GTFSStop[],
     route: GTFSRoute,
-    trip: GTFSTrip
+    trip: GTFSTrip,
+    is_multimodal: boolean,
+    transfer_point?: string,
+    legs?: RouteLeg[]
   }[]> => {
     try {
       console.log('Calling findRoutesBetweenStops API with:', fromStop.stop_id, toStop.stop_id);
@@ -672,6 +687,7 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
           route_short_name: route.route_short_name,
           route_long_name: route.route_long_name,
           route_type: route.route_type?.toString() || '3', // Default to '3' (PUJ) if not provided
+          route_signboard: route.route_signboard,
           agency_id: route.agency_id
         },
         trip: {
@@ -795,24 +811,9 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
 
       console.log('Direct distance:', directDistance, 'km');
 
-      // Check if walking distance (< 0.5km or 500 meters)
-      if (directDistance < 0.5) {
-        console.log('Walking distance detected! Showing walking route...');
-        const walkingRoute: RouteResult = {
-          summary: `${fromStop.stop_name} → ${toStop.stop_name}`,
-          routeName: 'Walking Route',
-          mode: 'Walking',
-          fare: { regular: 'Free', discounted: 'Free' },
-          distance: `${directDistance.toFixed(2)} km`,
-          origin: fromStop,
-          destination: toStop,
-          routeType: -1, // Special type for walking
-          routeId: 'walking'
-        };
-        setRouteResults([walkingRoute]);
-        setIsSearching(false);
-        return;
-      }
+      // Note: Removed early return for walking distances
+      // Let the backend find walking routes with proper shape data
+      // Walking routes are stored in the database with shape coordinates
 
       // Find direct routes
       const directRoutes = await findRoute(fromStop, toStop);
@@ -858,16 +859,27 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
           .map(stop => stop.stop_name)
           .join(" → ");
 
+        // For multi-modal routes, get signboard from first leg (the transit part)
+        const signboard = routeInfo.is_multimodal && routeInfo.legs?.[0]?.route_signboard
+          ? routeInfo.legs[0].route_signboard
+          : routeInfo.route.route_signboard;
+
+        // For multi-modal routes, simplify the name
+        const displayRouteName = routeInfo.is_multimodal && routeInfo.legs?.[0]
+          ? `${routeInfo.legs[0].route_name || routeInfo.route.route_short_name} (with walking)`
+          : `${routeInfo.route.route_long_name || routeInfo.route.route_short_name} (${routeInfo.trip.trip_headsign || mode})`;
+
         return {
           summary,
-          routeName: `${routeInfo.route.route_long_name || routeInfo.route.route_short_name} (${routeInfo.trip.trip_headsign || mode})`,
+          routeName: displayRouteName,
           mode,
           fare: fareEstimate.fare,
           distance: `${totalDistance.toFixed(2)} km`,
           origin: routeInfo.stops[0],
           destination: routeInfo.stops[routeInfo.stops.length - 1],
           routeType,
-          routeId: routeInfo.route.route_id || 'unknown'
+          routeId: routeInfo.route.route_id || 'unknown',
+          signboard: signboard
         };
       });
 
@@ -878,7 +890,61 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
       // Check if no routes found - don't show alert, just set empty results
       // The UI will handle showing a nice "no routes found" message
 
-      setRouteResults(results);
+      // Filter routes based on origin and destination to determine signboard direction
+      const originName = fromStop.stop_name.toUpperCase();
+      const destName = toStop.stop_name.toUpperCase();
+
+      // Helper function to check if location name matches
+      const isMapua = (name: string) => name.includes('MAPUA') || name.includes('MAPÚA');
+      const isBeacon = (name: string) => name.includes('THE BEACON') || name.includes('BEACON');
+      const isWaltermart = (name: string) => name.includes('WALTERMART');
+      const isShopwise = (name: string) => name.includes('SHOPWISE');
+
+      // Determine which signage to show based on origin and destination
+      // Show PRC, Shopwise signage when going FROM (The Beacon, Waltermart, Shopwise) TO (Shopwise, Mapúa Makati)
+      const showPrcShopwise =
+        (isBeacon(originName) && (isShopwise(destName) || isMapua(destName))) ||
+        (isWaltermart(originName) && (isShopwise(destName) || isMapua(destName))) ||
+        (isShopwise(originName) && isMapua(destName)); // Walking from Shopwise to Mapúa
+
+      // Show Waltermart, Mantrade, MRT signage when going FROM (Shopwise, Mapúa Makati) TO (The Beacon, Waltermart, Shopwise)
+      const showMrtRoutes =
+        (isShopwise(originName) && (isBeacon(destName) || isWaltermart(destName))) ||
+        (isMapua(originName) && (isBeacon(destName) || isWaltermart(destName) || isShopwise(destName))); // Walking from Mapúa to Shopwise
+
+      console.log('Origin:', fromStop.stop_name);
+      console.log('Destination:', toStop.stop_name);
+      console.log('Show PRC/Shopwise routes:', showPrcShopwise);
+      console.log('Show MRT routes:', showMrtRoutes);
+      console.log('Total results before filtering:', results.length);
+
+      // Log all signboards before filtering
+      results.forEach((r, idx) => {
+        console.log(`Route ${idx + 1} signboard:`, r.signboard);
+      });
+
+      // Filter routes based on origin-destination pair
+      const filteredResults = results.filter(route => {
+        const signboard = route.signboard?.toUpperCase() || '';
+
+        // Routes going towards Shopwise/Mapúa Makati (show PRC, Shopwise)
+        if (showPrcShopwise) {
+          return signboard.includes('PRC') && signboard.includes('SHOPWISE');
+        }
+
+        // Routes going towards The Beacon/Waltermart (show MRT, Waltermart, Mantrade)
+        if (showMrtRoutes) {
+          return signboard.includes('MRT') &&
+                 (signboard.includes('WALTERMART') || signboard.includes('MANTRADE'));
+        }
+
+        // For other origin-destination pairs, show all routes
+        return true;
+      });
+
+      console.log('Filtered results count:', filteredResults.length);
+
+      setRouteResults(filteredResults);
     } catch (error) {
       console.error("Error during search:", error);
       alert("An error occurred while searching. Please try again. Check the console for details.");
@@ -1325,6 +1391,15 @@ const RoutesTab: React.FC<RoutesTabProps> = ({ initialFrom, initialTo }) => {
                             ))}
                           </div>
                           <p className="text-xs text-gray-600 dark:text-gray-400 mb-2 transition-colors">{route.routeName}</p>
+                          
+                          {route.signboard && (
+                            <div className="flex items-center space-x-2 mb-2">
+                              <span className="text-xs text-gray-500 dark:text-gray-400">Look for:</span>
+                              <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200 text-xs font-bold rounded border border-yellow-300 dark:border-yellow-700">
+                                {route.signboard}
+                              </span>
+                            </div>
+                          )}
 
                           <div className="flex items-center space-x-3 flex-wrap gap-2">
                             <span className="px-2 py-1 text-white text-xs font-medium rounded-full"

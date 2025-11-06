@@ -65,11 +65,18 @@ const RouteMap: React.FC<RouteMapProps> = ({ routeId, originStop, destinationSto
 
   useEffect(() => {
     const fetchTripShapes = async () => {
+      // Skip fetching shapes for walking routes
+      if (routeId === 'walking') {
+        setSegments([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
-        // Fetch all trip segments between origin and destination
-        const data = await api.getTripShapes(originStop.stop_id, destinationStop.stop_id);
+        // Fetch all trip segments between origin and destination for this specific route
+        const data = await api.getTripShapes(originStop.stop_id, destinationStop.stop_id, routeId);
         setSegments(data.segments || []);
       } catch (err) {
         // Silently fail - shape data is optional
@@ -83,7 +90,7 @@ const RouteMap: React.FC<RouteMapProps> = ({ routeId, originStop, destinationSto
     if (originStop.stop_id && destinationStop.stop_id) {
       fetchTripShapes();
     }
-  }, [originStop.stop_id, destinationStop.stop_id]);
+  }, [originStop.stop_id, destinationStop.stop_id, routeId]);
 
   // Convert segments to polyline data
   const hasSegments = segments.length > 0;

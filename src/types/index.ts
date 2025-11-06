@@ -166,6 +166,7 @@ export interface EnhancedPUJRoute {
   route_id: string;
   route_short_name: string;
   route_long_name: string;
+  route_signboard?: string;
 
   // Route type (GTFS standard)
   route_type: 3; // Always 3 for PUJ

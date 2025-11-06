@@ -1,3 +1,5 @@
-route_id,agency_id,route_short_name,route_long_name,route_type
-PRC01,JEEP01,PRC Jeepney,The Beacon to Mapua Makati University,3
-PRC02,JEEP01,PRC Jeepney,Waltermart Makati to Mapua Makati University,3
+route_id,agency_id,route_short_name,route_long_name,route_type,route_signboard
+PRC01,JEEP01,PRC Jeepney,The Beacon to Mapua Makati University,3,"PRC, SHOPWISE"
+PRC02,JEEP01,PRC Jeepney,Waltermart Makati to Mapua Makati University,3,"PRC, SHOPWISE"
+MRT01,JEEP01,MRT Jeepney,Shopwise Chino Roces Makati to Waltermart Makati,3,"MRT, WALTERMART, MANTRADE"
+MRT02,JEEP01,MRT Jeepney,Shopwise Chino Roces Makati to The Beacon Makati,3,"MRT, WALTERMART, MANTRADE"

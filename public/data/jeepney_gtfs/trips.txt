@@ -3,6 +3,9 @@ PRC01,WEEKDAY,T001,Jeepney: Beacon to Shopwise,PRC01_1
 PRC01,WEEKDAY,T001_WALK,Walk: Shopwise to Mapua,PRC01_WALK
 PRC01,WEEKDAY,T003,Jeepney: Beacon to Shopwise Only,PRC01_1
 
-PRC02,WEEKDAY,T002,Jeepney: Waltermart to Mapua,PRC02_2
+PRC02,WEEKDAY,T002,Jeepney: Waltermart to Shopwise,PRC02_2
 PRC02,WEEKDAY,T002_WALK,Walk: Shopwise to Mapua,PRC01_WALK
 PRC02,WEEKDAY,T004,Jeepney: Waltermart to Shopwise Only,PRC02_2
+
+MRT01,WEEKDAY,T005,Jeepney: Shopwise to Waltermart,MRT01_1
+MRT02,WEEKDAY,T006,Jeepney: Shopwise to Beacon,MRT02_1

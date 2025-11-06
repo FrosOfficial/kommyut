@@ -90,9 +90,12 @@ export const getRouteShape = async (routeId: string) => {
   }
 };
 
-export const getTripShapes = async (fromStopId: string, toStopId: string) => {
+export const getTripShapes = async (fromStopId: string, toStopId: string, routeId?: string) => {
   try {
-    const response = await fetch(`${API_URL}/gtfs/trip-shapes/${fromStopId}/${toStopId}`);
+    const url = routeId
+      ? `${API_URL}/gtfs/trip-shapes/${fromStopId}/${toStopId}?routeId=${encodeURIComponent(routeId)}`
+      : `${API_URL}/gtfs/trip-shapes/${fromStopId}/${toStopId}`;
+    const response = await fetch(url);
     if (!response.ok) {
       return { segments: [] };
     }
